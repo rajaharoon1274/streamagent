@@ -8,9 +8,9 @@ import { NextResponse } from 'next/server'
 export async function GET(request) {
   const auth = await requireAuth()
   if (auth instanceof NextResponse) return auth
-  const { session, supabase } = auth
+  const { user, supabase } = auth
 
-  const workspace = await getWorkspace(supabase, session.user.id)
+  const workspace = await getWorkspace(supabase, user.id)
   if (!workspace) {
     return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
   }

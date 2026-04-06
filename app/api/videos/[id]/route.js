@@ -21,9 +21,8 @@ async function getOwnedVideo(supabase, videoId, userId) {
 export async function GET(request, { params }) {
   const auth = await requireAuth()
   if (auth instanceof NextResponse) return auth
-  const { session, supabase } = auth
-
-  const video = await getOwnedVideo(supabase, params.id, session.user.id)
+  const { user, supabase } = auth
+  const video = await getOwnedVideo(supabase, params.id, user.id)
   if (!video) {
     return NextResponse.json({ error: 'Video not found' }, { status: 404 })
   }
@@ -35,9 +34,8 @@ export async function GET(request, { params }) {
 export async function PATCH(request, { params }) {
   const auth = await requireAuth()
   if (auth instanceof NextResponse) return auth
-  const { session, supabase } = auth
-
-  const video = await getOwnedVideo(supabase, params.id, session.user.id)
+  const { user, supabase } = auth
+  const video = await getOwnedVideo(supabase, params.id, user.id)
   if (!video) {
     return NextResponse.json({ error: 'Video not found' }, { status: 404 })
   }
@@ -90,9 +88,8 @@ export async function PATCH(request, { params }) {
 export async function DELETE(request, { params }) {
   const auth = await requireAuth()
   if (auth instanceof NextResponse) return auth
-  const { session, supabase } = auth
-
-  const video = await getOwnedVideo(supabase, params.id, session.user.id)
+  const { user, supabase } = auth
+  const video = await getOwnedVideo(supabase, params.id, user.id)
   if (!video) {
     return NextResponse.json({ error: 'Video not found' }, { status: 404 })
   }

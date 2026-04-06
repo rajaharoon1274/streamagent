@@ -5,9 +5,9 @@ import { NextResponse } from 'next/server'
 export async function PATCH(request, { params }) {
   const auth = await requireAuth()
   if (auth instanceof NextResponse) return auth
-  const { session, supabase } = auth
+  const { user, supabase } = auth
 
-  const workspace = await getWorkspace(supabase, session.user.id)
+  const workspace = await getWorkspace(supabase, user.id)
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
 
   const body = await request.json()
@@ -31,9 +31,9 @@ export async function PATCH(request, { params }) {
 export async function DELETE(request, { params }) {
   const auth = await requireAuth()
   if (auth instanceof NextResponse) return auth
-  const { session, supabase } = auth
+  const { user, supabase } = auth
 
-  const workspace = await getWorkspace(supabase, session.user.id)
+  const workspace = await getWorkspace(supabase, user.id)
   if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
 
   const { error } = await supabase.from('folders')
