@@ -7,16 +7,19 @@ import { useApp } from '@/context/AppContext'
 
 const AuthContext = createContext(null)
 
+// ✅ Move outside component — called once at module load
+const supabase = createClient()
+
 export function AuthProvider({ children }) {
   const { set: setApp } = useApp()
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [workspace, setWorkspace] = useState(null)
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
   const router = useRouter()
 
-  // Fetch profile + workspace for a user
+  // ✅ removed: const supabase = createClient() from here
+
   async function fetchUserData(userId) {
     const [profileRes, workspaceRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).single(),
@@ -25,18 +28,16 @@ export function AuthProvider({ children }) {
     if (profileRes.data) {
       const p = profileRes.data
       setProfile(p)
-      // Sync real profile into AppContext so every component (Dashboard, Sidebar, Settings)
-      // shows the correct user name and email without any extra fetches.
       setApp({
         account: {
-          firstName:  p.first_name  || '',
-          lastName:   p.last_name   || '',
-          email:      p.email       || '',
-          company:    p.company     || '',
-          phone:      p.phone       || '',
-          timezone:   p.timezone    || 'America/Los_Angeles',
-          avatarUrl:  p.avatar_url  || '',
-          twoFA:      p.two_fa_enabled || false,
+          firstName: p.first_name || '',
+          lastName: p.last_name || '',
+          email: p.email || '',
+          company: p.company || '',
+          phone: p.phone || '',
+          timezone: p.timezone || 'America/Los_Angeles',
+          avatarUrl: p.avatar_url || '',
+          twoFA: p.two_fa_enabled || false,
         },
       })
     }
@@ -44,7 +45,6 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user)
@@ -53,7 +53,6 @@ export function AuthProvider({ children }) {
       setLoading(false)
     })
 
-    // Subscribe to auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (event === 'SIGNED_OUT' || !session) {
@@ -79,7 +78,7 @@ export function AuthProvider({ children }) {
     setProfile(null)
     setWorkspace(null)
     router.push('/login')
-  }, [router, supabase])
+  }, [router])
 
   return (
     <AuthContext.Provider value={{ user, profile, workspace, loading, logout, supabase }}>
