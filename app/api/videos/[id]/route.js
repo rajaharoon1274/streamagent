@@ -44,7 +44,6 @@ export async function PATCH(request, { params }) {
   try { body = await request.json() }
   catch { return NextResponse.json({ error: 'Invalid request body' }, { status: 400 }) }
 
-  // Only these fields can be updated via PATCH
   const ALLOWED_FIELDS = [
     'title', 'privacy', 'folder_id', 'password',
     'password_headline', 'password_hint', 'comments_enabled',
@@ -56,16 +55,17 @@ export async function PATCH(request, { params }) {
     if (body[key] !== undefined) updates[key] = body[key]
   }
 
+  
+  if (body.lp !== undefined) updates.landing_page = body.lp
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
   }
 
-  // Validate title if being updated
   if (updates.title !== undefined && !String(updates.title).trim()) {
     return NextResponse.json({ error: 'Title cannot be empty' }, { status: 400 })
   }
 
-  // Auto-set published_at when published for the first time
   if (updates.privacy === 'published' && !video.published_at) {
     updates.published_at = new Date().toISOString()
   }

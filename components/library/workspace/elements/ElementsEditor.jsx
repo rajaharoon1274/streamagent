@@ -7,9 +7,8 @@ import ElementPalette    from './ElementPalette'
 import ElementCanvas     from './ElementCanvas'
 import ElementProperties from './ElementProperties'
 import { EL_TYPES }      from './elTypes'
+import { useElements }   from '@/hooks/useElements'
 
-let _nextId = 1
-function makeId() { return `el-${Date.now()}-${_nextId++}` }
 
 function parseDuration(v) {
   if (!v) return 180
@@ -22,7 +21,7 @@ const FS_TYPES  = new Set(['funnel-urgency','cta-email','cta-booking','cta-downl
 const MOB_TYPES = new Set(['mob-call','mob-sms','mob-vcard','mob-calendar','mob-swipe','mob-share','mob-directions','mob-screenshot','mob-shake'])
 const GATE_DFLT = new Set(['funnel-urgency','cta-email','cta-booking','cta-download'])
 
-function makeElement(type) {
+function makeCanvasElement(type) {
   const def = EL_TYPES[type] || {}
   let xPct=10, yPct=10, wPct=40, hPct=25
   if      (FS_TYPES.has(type))          { xPct=0;  yPct=0;  wPct=100; hPct=100 }
@@ -37,30 +36,35 @@ function makeElement(type) {
   else if (type==='image-clickable')    { xPct=10; yPct=10; wPct=35;  hPct=35  }
 
   return {
-    id:         makeId(),
     type,
     props:      { ...(def.defs || {}) },
     xPct, yPct, wPct, hPct,
     timing:     { mode:'at-time', in:0, duration:5, animIn:'fadeIn', animOut:'fadeOut', animSpeed:'0.4', trigger:'time' },
     gate:       { enabled: GATE_DFLT.has(type) },
-    conditions: [],
+    conditions: MOB_TYPES.has(type) ? [{ type: 'device', value: 'mobile' }] : [],
     opacity:    1,
     zIndex:     1,
   }
 }
+function debounce(fn, ms) {
+  let t
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) }
+}
 
 export default function ElementsEditor({ video: v, accentColor, onBack }) {
-  const [elements,    setElements]   = useState(() => {
-    const raw = v?.elements || []
-    return raw.map(el => ({
-      ...el,
-      conditions: Array.isArray(el.conditions) ? el.conditions : [],
-      timing: el.timing ? {
-        ...el.timing,
-        in: el.timing.in ?? el.timing.triggerAt ?? 0,
-      } : { in: 0, duration: 5, animIn: 'fadeIn', animOut: 'fadeOut', animSpeed: '0.4', trigger: 'time' },
-    }))
-  })
+  const videoId = v?.id
+
+  // Real data from DB
+  const {
+    elements:        dbElements,
+    isLoading:       elementsLoading,
+    createElement,
+    updateElement,
+    deleteElement,
+    bulkSaveElements,
+  } = useElements(videoId)
+
+  const [localElements, setLocalElements] = useState([])
   const [selectedId,  setSelectedId] = useState(null)
   const [activeType,  setActiveType] = useState(null)
   const [saving,      setSaving]     = useState(false)
@@ -70,9 +74,17 @@ export default function ElementsEditor({ video: v, accentColor, onBack }) {
   const [playing,     setPlaying]    = useState(false)
 
   const playRef     = useRef(null)
-  const autoSaveRef = useRef(null)
+  const initialised  = useRef(false)
   const accent      = accentColor || '#4F6EF7'
   const duration    = parseDuration(v?.duration_seconds || v?.dur)
+
+  // Sync DB elements → local state (only on first load)
+useEffect(() => {
+  if (!elementsLoading && !initialised.current && dbElements.length >= 0) {
+    setLocalElements(dbElements)
+    initialised.current = true
+  }
+}, [elementsLoading, dbElements])
 
   useEffect(() => {
     if (playing) {
@@ -100,15 +112,47 @@ export default function ElementsEditor({ video: v, accentColor, onBack }) {
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
   )
 
-  const addElement = useCallback((type) => {
-    const el   = makeElement(type)
-    const meta = EL_TYPES[type]
-    setElements(prev => [...prev, el])
-    setSelectedId(el.id)
-    // Pause video when adding element
-    setPlaying(false)
+const addElement = useCallback(async (type) => {
+  const meta     = EL_TYPES[type]
+  const canvasEl = makeCanvasElement(type)
+  setPlaying(false)
+
+  // Show placeholder immediately (optimistic)
+  const tempId = `temp-${Date.now()}`
+  const tempEl = { ...canvasEl, id: tempId, _isTemp: true }
+  setLocalElements(prev => [...prev, tempEl])
+
+  try {
+    // POST to DB — returns element with real UUID
+    const saved = await createElement(canvasEl)
+    // Replace temp with real element
+    setLocalElements(prev => prev.map(el => el.id === tempId ? saved : el))
+    setSelectedId(saved.id)
     toast.success(`${meta?.icon || '⚡'} ${meta?.label || type} added`, { duration: 1500 })
-  }, [])
+  } catch (err) {
+    // Remove temp if failed
+    setLocalElements(prev => prev.filter(el => el.id !== tempId))
+    toast.error('Failed to add element')
+    console.error('[addElement]', err.message)
+  }
+}, [createElement])
+
+const updateElementRef = useRef(updateElement)
+useEffect(() => { updateElementRef.current = updateElement }, [updateElement])
+
+const debouncedUpdate = useRef(
+  debounce(async (el) => {
+    if (!el.id || el._isTemp) return
+    try {
+      await updateElementRef.current(el.id, el)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      toast.error('Failed to save changes')
+      console.error('[handleChange]', err.message)
+    }
+  }, 800)
+).current
 
   function handleDragStart({ active }) { setActiveType(active.id) }
   function handleDragEnd({ active, over }) {
@@ -123,40 +167,55 @@ export default function ElementsEditor({ video: v, accentColor, onBack }) {
   }
 
   function handleChange(updated) {
-    setElements(prev => prev.map(el => el.id === updated.id ? updated : el))
-    scheduleAutoSave()
-  }
-  function handleDelete(id) {
-    setElements(prev => prev.filter(el => el.id !== id))
-    if (selectedId === id) setSelectedId(null)
-    toast('Element removed', { icon: '🗑', duration: 1500 })
-    scheduleAutoSave()
-  }
-  function scheduleAutoSave() {
-    clearTimeout(autoSaveRef.current)
-    autoSaveRef.current = setTimeout(() => save(false), 2000)
-  }
-  useEffect(() => () => clearTimeout(autoSaveRef.current), [])
+  setLocalElements(prev => prev.map(el => el.id === updated.id ? updated : el))
+  debouncedUpdate(updated)
+}
+async function handleDelete(id) {
+  // Optimistic remove
+  setLocalElements(prev => prev.filter(el => el.id !== id))
+  if (selectedId === id) setSelectedId(null)
+  toast('Element removed', { icon: '🗑', duration: 1500 })
 
-  async function save(showToast = true) {
-    if (!v?.id) return
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/videos/${v.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ elements }),
-      })
-      if (!res.ok) throw new Error()
-      setSaved(true)
-      if (showToast) toast.success('Elements saved!')
-      setTimeout(() => setSaved(false), 3000)
-    } catch { if (showToast) toast.error('Failed to save') }
-    finally { setSaving(false) }
+  try {
+    await deleteElement(id)
+  } catch (err) {
+    toast.error('Failed to delete element')
+    console.error('[handleDelete]', err.message)
   }
+}
+  async function handleBulkSave(elements) {
+  try {
+    await bulkSaveElements(elements)
+  } catch (err) {
+    console.error('[handleBulkSave]', err.message)
+  }
+}
 
-  const selectedElement = elements.find(el => el.id === selectedId) || null
+  async function handleManualSave() {
+  if (!videoId) return
+  setSaving(true)
+  try {
+    const toSave = localElements.filter(el => el.id && !el._isTemp)
+    if (toSave.length > 0) await bulkSaveElements(toSave)
+    setSaved(true)
+    toast.success('Elements saved!')
+    setTimeout(() => setSaved(false), 3000)
+  } catch {
+    toast.error('Failed to save')
+  } finally {
+    setSaving(false)
+  }
+}
+  const selectedElement = localElements.find(el => el.id === selectedId) || null
   const dragMeta        = activeType ? (EL_TYPES[activeType] || {}) : null
 
+if (elementsLoading && localElements.length === 0) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--t3)', fontSize: 13 }}>
+      Loading elements...
+    </div>
+  )
+}
   return (
     <DndContext sensors={sensors} collisionDetection={pointerWithin}
       onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -220,7 +279,7 @@ export default function ElementsEditor({ video: v, accentColor, onBack }) {
                 Saved
               </span>
             ) : (
-              <button onClick={() => save(true)} disabled={saving}
+              <button onClick={handleManualSave} disabled={saving}
                 style={{ padding:'5px 13px', borderRadius:7, fontSize:11, fontWeight:700,
                   cursor:saving?'not-allowed':'pointer',
                   background:saving?'var(--s3)':accent, border:'none',
@@ -231,9 +290,10 @@ export default function ElementsEditor({ video: v, accentColor, onBack }) {
           </div>
 
           <ElementCanvas
-            elements={elements} selectedId={selectedId}
+            elements={localElements} selectedId={selectedId}
             onSelect={handleSelect} onDeselect={() => setSelectedId(null)}
             onElementChange={handleChange} onDelete={handleDelete}
+             onBulkSave={handleBulkSave} 
             accentColor={accent} video={v} showGrid={showGrid}
             currentTime={currentTime} duration={duration} onSeek={setCurTime}
             playing={playing} onTogglePlay={togglePlay}
@@ -242,7 +302,7 @@ export default function ElementsEditor({ video: v, accentColor, onBack }) {
 
         {/* CHANGED: width 270→284 to match HTML */}
         <div className="elements-properties-col" style={{ width:284, flexShrink:0, borderLeft:'1px solid var(--b1)', overflow:'hidden', background:'var(--s1)', display:'flex', flexDirection:'column' }}>
-          <ElementProperties element={selectedElement} elements={elements}
+          <ElementProperties element={selectedElement} elements={localElements}
             onChange={handleChange} onDelete={handleDelete} onSelect={handleSelect} />
         </div>
       </div>
