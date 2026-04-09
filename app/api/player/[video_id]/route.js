@@ -94,6 +94,7 @@ export async function GET(req, { params }) {
             },
             elements: elements || [],
             workspace: {
+                id: video.workspace_id,
                 bandwidth_gated: workspace?.bandwidth_gated ?? false,
                 bandwidth_degraded: workspace?.bandwidth_degraded ?? false,
                 plan_tier: workspace?.plan_tier ?? 'core',

@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import VideoPlayer from '@/components/player/VideoPlayer'
 import PlayerOverlay from '@/components/player/PlayerOverlay'
+import { resolveViewerIdentity } from '@/lib/viewerIdentity'
 
 // ── Password Gate ─────────────────────────────────────────────────────────────
 function PasswordGate({ video, videoId, onGranted }) {
@@ -109,10 +110,33 @@ export default function WatchClient({ data, videoId }) {
     const branding = video.branding || {}
     const accent = branding.primaryColor || lp.brand || '#4F6EF7'
     const font = lp.font || branding.fontFamily || 'Inter'
-
     // Check sessionStorage for existing password grant
     const [granted, setGranted] = useState(false)
     const [grantChecked, setGrantChecked] = useState(false)
+    const viewerIdentityRef = useRef(null)
+
+    useEffect(() => {
+        viewerIdentityRef.current = resolveViewerIdentity()
+        const { lid, email } = viewerIdentityRef.current
+
+        console.log('[WatchClient] viewer identity:', { lid, email })
+        // If we have either lid or email cookie → track this visit
+        if (lid || email) {
+            fetch('/api/leads/track-visit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    workspace_id: workspace?.id,
+                    video_id: video.id,
+                    lid,
+                    email,
+                    source_url: window.location.href,
+                }),
+            }).catch(() => { }) // silent — non-blocking
+        }
+    }, [])
+
+
 
     useEffect(() => {
         const hasGrant = sessionStorage.getItem(`video_grant_${videoId}`) === 'true'
@@ -125,7 +149,7 @@ export default function WatchClient({ data, videoId }) {
     // Time tracking — stored in ref for performance
     const currentTimeRef = useRef(0)
     const containerRef = useRef(null)
-
+    const playerRef = useRef(null)
     const handleTimeUpdate = useCallback((t) => {
         currentTimeRef.current = t
     }, [])
@@ -219,6 +243,7 @@ export default function WatchClient({ data, videoId }) {
                     style={{ width: '100%', maxWidth: 900, marginBottom: 28, position: 'relative' }}
                 >
                     <VideoPlayer
+                        ref={playerRef}
                         streamUid={video.stream_uid}
                         aspectRatio={video.aspect_ratio || '16:9'}
                         branding={{
@@ -237,6 +262,10 @@ export default function WatchClient({ data, videoId }) {
                             elements={elements}
                             currentTimeRef={currentTimeRef}
                             containerRef={containerRef}
+                            videoId={video.id}
+                            workspaceId={workspace?.id || video.workspace_id}
+                            playerRef={playerRef}
+                            viewerIdentityRef={viewerIdentityRef}
                         />
                     </VideoPlayer>
                 </div>
