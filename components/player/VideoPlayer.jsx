@@ -18,7 +18,6 @@ function loadFont(family) {
     document.head.appendChild(link)
 }
 
-// ── Load Cloudflare Stream SDK script once ────────────────────────────────────
 function loadStreamSDK() {
     return new Promise((resolve) => {
         if (window.Stream) { resolve(window.Stream); return }
@@ -47,7 +46,7 @@ const VideoPlayer = forwardRef(function VideoPlayer({
 }, ref) {
 
     const iframeRef = useRef(null)
-    const sdkPlayerRef = useRef(null)   // ← Cloudflare SDK player instance
+    const sdkPlayerRef = useRef(null)
     const [playerReady, setPlayerReady] = useState(false)
     const [showControls, setShowControls] = useState(true)
     const controlsTimer = useRef(null)
@@ -65,42 +64,54 @@ const VideoPlayer = forwardRef(function VideoPlayer({
 
     useEffect(() => { loadFont(fontFamily) }, [fontFamily])
 
-    // ── Load SDK and attach to iframe ─────────────────────────────────────────
+    // ── Re-initialize SDK every time streamUid changes ────────────────────────
     useEffect(() => {
         if (!streamUid) return
         let destroyed = false
 
-        loadStreamSDK().then((StreamSDK) => {
-            if (destroyed || !iframeRef.current || !StreamSDK) return
+        // ── Reset ready state for new video ───────────────────────────────────
+        setPlayerReady(false)
 
-            const player = StreamSDK(iframeRef.current)
-            sdkPlayerRef.current = player
+        // ── Destroy previous SDK instance ───��─────────────────────────────────
+        if (sdkPlayerRef.current) {
+            try { sdkPlayerRef.current.destroy?.() } catch { }
+            sdkPlayerRef.current = null
+        }
 
-            player.addEventListener('loadeddata', () => {
-                if (destroyed) return
-                setPlayerReady(true)
-                onReady?.()
-                console.log('[VideoPlayer] Ready')
+        // ── Small delay — let iframe finish loading new src ───────────────────
+        const initTimer = setTimeout(() => {
+            loadStreamSDK().then((StreamSDK) => {
+                if (destroyed || !iframeRef.current || !StreamSDK) return
+
+                const player = StreamSDK(iframeRef.current)
+                sdkPlayerRef.current = player
+
+                player.addEventListener('loadeddata', () => {
+                    if (destroyed) return
+                    setPlayerReady(true)
+                    onReady?.()
+                    console.log('[VideoPlayer] Ready')
+                })
+
+                player.addEventListener('timeupdate', () => {
+                    if (destroyed) return
+                    onTimeUpdate?.(player.currentTime ?? 0)
+                })
+
+                player.addEventListener('play', () => console.log('[VideoPlayer] Playing'))
+                player.addEventListener('ended', () => console.log('[VideoPlayer] Ended'))
             })
-
-            player.addEventListener('timeupdate', () => {
-                if (destroyed) return
-                const t = player.currentTime ?? 0
-                onTimeUpdate?.(t)
-            })
-
-            player.addEventListener('play', () => console.log('[VideoPlayer] Playing'))
-            player.addEventListener('ended', () => console.log('[VideoPlayer] Ended'))
-        })
+        }, 300) // ← wait 300ms for iframe src to settle
 
         return () => {
             destroyed = true
+            clearTimeout(initTimer)
             try { sdkPlayerRef.current?.destroy?.() } catch { }
             sdkPlayerRef.current = null
         }
-    }, [streamUid]) // eslint-disable-line
+    }, [streamUid]) // ← re-runs every time streamUid changes ✅
 
-    // ── Expose pause/play to parent ───────────────────────────────────────────
+    // ── Expose pause/play/getCurrentTime to parent ────────────────────────────
     useImperativeHandle(ref, () => ({
         pause() {
             try { sdkPlayerRef.current?.pause() } catch { }
@@ -147,7 +158,6 @@ const VideoPlayer = forwardRef(function VideoPlayer({
         )
     }
 
-    // Build iframe URL — enable jsapi for SDK control
     const params = [
         autoplay ? 'autoplay=true' : null,
         embedMode ? 'muted=true' : null,
@@ -188,8 +198,9 @@ const VideoPlayer = forwardRef(function VideoPlayer({
                     ? `0 0 ${modeStyle.borderRadius}px ${modeStyle.borderRadius}px`
                     : 0,
             }}>
-                {/* ── Cloudflare Stream iframe (full size) ── */}
+                {/* Cloudflare Stream iframe */}
                 <iframe
+                    key={streamUid}           // ← FORCES full remount on uid change
                     ref={iframeRef}
                     src={iframeSrc}
                     style={{

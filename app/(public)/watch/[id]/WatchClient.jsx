@@ -1,5 +1,4 @@
 'use client'
-// app/(public)/watch/[id]/WatchClient.jsx
 import { useState, useRef, useCallback, useEffect } from 'react'
 import VideoPlayer from '@/components/player/VideoPlayer'
 import PlayerOverlay from '@/components/player/PlayerOverlay'
@@ -14,9 +13,7 @@ function PasswordGate({ video, videoId, onGranted }) {
     async function submit(e) {
         e.preventDefault()
         if (!pw.trim()) return
-        setLoading(true)
-        setError('')
-
+        setLoading(true); setError('')
         try {
             const res = await fetch(`/api/player/${videoId}/verify`, {
                 method: 'POST',
@@ -24,14 +21,7 @@ function PasswordGate({ video, videoId, onGranted }) {
                 body: JSON.stringify({ password: pw }),
             })
             const data = await res.json()
-
-            if (!res.ok) {
-                setError(data.error || 'Incorrect password')
-                setLoading(false)
-                return
-            }
-
-            // Store grant in sessionStorage so refresh doesn't re-lock
+            if (!res.ok) { setError(data.error || 'Incorrect password'); setLoading(false); return }
             sessionStorage.setItem(`video_grant_${videoId}`, 'true')
             onGranted()
         } catch {
@@ -45,8 +35,7 @@ function PasswordGate({ video, videoId, onGranted }) {
 
     return (
         <div style={{
-            minHeight: '100vh',
-            background: lp.bg || '#0F172A',
+            minHeight: '100vh', background: lp.bg || '#0F172A',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: '40px 16px',
         }}>
@@ -54,8 +43,7 @@ function PasswordGate({ video, videoId, onGranted }) {
                 width: '100%', maxWidth: 400,
                 background: 'rgba(255,255,255,0.04)',
                 border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 16, padding: '40px 32px',
-                textAlign: 'center',
+                borderRadius: 16, padding: '40px 32px', textAlign: 'center',
             }}>
                 <div style={{ fontSize: 36, marginBottom: 16 }}>🔒</div>
                 <h2 style={{ fontSize: 20, fontWeight: 800, color: '#fff', marginBottom: 8 }}>
@@ -68,16 +56,15 @@ function PasswordGate({ video, videoId, onGranted }) {
                 )}
                 <form onSubmit={submit}>
                     <input
-                        type="password"
-                        value={pw}
+                        type="password" value={pw}
                         onChange={e => { setPw(e.target.value); setError('') }}
                         placeholder="Enter password"
                         style={{
                             width: '100%', padding: '12px 14px', borderRadius: 9,
                             background: 'rgba(255,255,255,0.06)',
                             border: `1px solid ${error ? '#EF4444' : 'rgba(255,255,255,0.12)'}`,
-                            color: '#fff', fontSize: 14, marginBottom: 8, boxSizing: 'border-box',
-                            outline: 'none',
+                            color: '#fff', fontSize: 14, marginBottom: 8,
+                            boxSizing: 'border-box', outline: 'none',
                         }}
                     />
                     {error && (
@@ -86,13 +73,12 @@ function PasswordGate({ video, videoId, onGranted }) {
                         </p>
                     )}
                     <button
-                        type="submit"
-                        disabled={loading || !pw.trim()}
+                        type="submit" disabled={loading || !pw.trim()}
                         style={{
                             width: '100%', padding: '12px', borderRadius: 9,
                             background: loading ? 'rgba(255,255,255,0.1)' : accent,
-                            border: 'none', color: '#fff', fontSize: 14, fontWeight: 700,
-                            cursor: loading ? 'not-allowed' : 'pointer',
+                            border: 'none', color: '#fff', fontSize: 14,
+                            fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
                         }}
                     >
                         {loading ? 'Verifying…' : 'Watch Video'}
@@ -105,22 +91,74 @@ function PasswordGate({ video, videoId, onGranted }) {
 
 // ── Main Watch Client ─────────────────────────────────────────────────────────
 export default function WatchClient({ data, videoId }) {
-    const { video, elements = [], workspace } = data
+    const { video, elements: initialElements = [], workspace } = data
     const lp = video.landing_page || {}
     const branding = video.branding || {}
     const accent = branding.primaryColor || lp.brand || '#4F6EF7'
     const font = lp.font || branding.fontFamily || 'Inter'
-    // Check sessionStorage for existing password grant
-    const [granted, setGranted] = useState(false)
-    const [grantChecked, setGrantChecked] = useState(false)
-    const viewerIdentityRef = useRef(null)
 
+    // ── Route state ───────────────────────────────────────────────────────────
+    const [currentStreamUid, setCurrentStreamUid] = useState(video.stream_uid)
+    const [currentElements, setCurrentElements] = useState(initialElements)
+    const [currentVideoId, setCurrentVideoId] = useState(video.id)
+    const [isSwapping, setIsSwapping] = useState(false)
+    const [swapCount, setSwapCount] = useState(0)       // ✅ forces remount
+    const routePathRef = useRef([video.id])
+    const autoPlayAfterSwapRef = useRef(false)                        // ✅ auto-play flag
+
+    // ── onReady — auto-play after route swap ──────────────────────────────────
+    const handleReady = useCallback(() => {                           // ✅ was missing
+        console.log('[WatchClient] onReady fired, autoPlay flag:', autoPlayAfterSwapRef.current)
+        if (autoPlayAfterSwapRef.current) {
+            autoPlayAfterSwapRef.current = false
+            console.log('[WatchClient] Auto-playing after route swap')
+            setTimeout(() => {
+                try { playerRef.current?.play() } catch { }
+            }, 200)
+        }
+    }, [])
+
+    // ── Route swap handler ────────────────────────────────────────────────────
+    const handleRouteSwap = useCallback(async (targetVideoId) => {
+        if (!targetVideoId || isSwapping) return
+        setIsSwapping(true)
+
+        try {
+            const res = await fetch(`/api/player/${targetVideoId}`)
+            if (!res.ok) throw new Error('Failed to load target video')
+            const data = await res.json()
+
+            autoPlayAfterSwapRef.current = true                       // ✅ set BEFORE swap
+
+            setCurrentStreamUid(data.video.stream_uid)
+            setCurrentElements(data.elements || [])
+            setCurrentVideoId(targetVideoId)
+            setSwapCount(c => c + 1)                                  // ✅ triggers remount
+
+            const url = new URL(window.location.href)
+            url.searchParams.set('route_node', targetVideoId)
+            window.history.pushState({}, '', url)
+
+            routePathRef.current = [...routePathRef.current, targetVideoId]
+            sessionStorage.setItem(
+                `route_path_${videoId}`,
+                JSON.stringify(routePathRef.current)
+            )
+
+            console.log('[WatchClient] Route swapped to:', targetVideoId)
+        } catch (err) {
+            console.error('[WatchClient] Route swap failed:', err)
+            autoPlayAfterSwapRef.current = false
+        } finally {
+            setIsSwapping(false)
+        }
+    }, [isSwapping, videoId])
+
+    // ── Viewer identity ───────────────────────────────────────────────────────
+    const viewerIdentityRef = useRef(null)
     useEffect(() => {
         viewerIdentityRef.current = resolveViewerIdentity()
         const { lid, email } = viewerIdentityRef.current
-
-        console.log('[WatchClient] viewer identity:', { lid, email })
-        // If we have either lid or email cookie → track this visit
         if (lid || email) {
             fetch('/api/leads/track-visit', {
                 method: 'POST',
@@ -128,25 +166,23 @@ export default function WatchClient({ data, videoId }) {
                 body: JSON.stringify({
                     workspace_id: workspace?.id,
                     video_id: video.id,
-                    lid,
-                    email,
+                    lid, email,
                     source_url: window.location.href,
                 }),
-            }).catch(() => { }) // silent — non-blocking
+            }).catch(() => { })
         }
-    }, [])
+    }, []) // eslint-disable-line
 
-
-
+    // ── Password grant ────────────────────────────────────────────────────────
+    const [granted, setGranted] = useState(false)
+    const [grantChecked, setGrantChecked] = useState(false)
     useEffect(() => {
         const hasGrant = sessionStorage.getItem(`video_grant_${videoId}`) === 'true'
-        if (!video.requires_password || hasGrant) {
-            setGranted(true)
-        }
+        if (!video.requires_password || hasGrant) setGranted(true)
         setGrantChecked(true)
     }, [video.requires_password, videoId])
 
-    // Time tracking — stored in ref for performance
+    // ── Refs ──────────────────────────────────────────────────────────────────
     const currentTimeRef = useRef(0)
     const containerRef = useRef(null)
     const playerRef = useRef(null)
@@ -154,24 +190,26 @@ export default function WatchClient({ data, videoId }) {
         currentTimeRef.current = t
     }, [])
 
-    // ── Bandwidth gated ────────────────────────────────────────────────────────
+    // ── Bandwidth gated ───────────────────────────────────────────────────────
     if (workspace?.bandwidth_gated) {
         return (
             <div style={{
                 minHeight: '100vh', background: '#0F172A',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: 24, fontFamily: `'${font}', sans-serif`,
+                display: 'flex', alignItems: 'center',
+                justifyContent: 'center', padding: 24,
+                fontFamily: `'${font}', sans-serif`,
             }}>
                 <div style={{ textAlign: 'center', color: '#fff' }}>
                     <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
                     <h2 style={{ marginBottom: 8 }}>Video temporarily unavailable</h2>
-                    <p style={{ color: 'rgba(255,255,255,0.5)' }}>This video has exceeded its bandwidth limit.</p>
+                    <p style={{ color: 'rgba(255,255,255,0.5)' }}>
+                        This video has exceeded its bandwidth limit.
+                    </p>
                 </div>
             </div>
         )
     }
 
-    // Wait until client has checked sessionStorage
     if (!grantChecked) {
         return (
             <div style={{
@@ -195,14 +233,11 @@ export default function WatchClient({ data, videoId }) {
 
     return (
         <div style={{
-            minHeight: '100vh',
-            background: lp.bg || '#0F172A',
+            minHeight: '100vh', background: lp.bg || '#0F172A',
             fontFamily: `'${font}', sans-serif`,
             display: 'flex', flexDirection: 'column',
-            alignItems: 'center',
-            padding: '40px 16px',
+            alignItems: 'center', padding: '40px 16px',
         }}>
-
             {/* ── Logo ── */}
             {lp.showLogo !== false && (lp.logoUrl || lp.logoText) && (
                 <div style={{ marginBottom: 24 }}>
@@ -216,9 +251,8 @@ export default function WatchClient({ data, videoId }) {
             {/* ── Headline ── */}
             {lp.showHeadline !== false && (lp.headline || video.title) && (
                 <h1 style={{
-                    fontSize: 'clamp(22px, 4vw, 38px)',
-                    fontWeight: 800, color: '#fff',
-                    textAlign: 'center', marginBottom: 10,
+                    fontSize: 'clamp(22px, 4vw, 38px)', fontWeight: 800,
+                    color: '#fff', textAlign: 'center', marginBottom: 10,
                     maxWidth: 720, lineHeight: 1.2,
                 }}>
                     {lp.headline || video.title}
@@ -242,30 +276,49 @@ export default function WatchClient({ data, videoId }) {
                     ref={containerRef}
                     style={{ width: '100%', maxWidth: 900, marginBottom: 28, position: 'relative' }}
                 >
+                    {/* Swapping overlay */}
+                    {isSwapping && (
+                        <div style={{
+                            position: 'absolute', inset: 0, zIndex: 200,
+                            background: 'rgba(7,9,15,0.85)',
+                            display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', borderRadius: 12,
+                        }}>
+                            <div style={{
+                                width: 40, height: 40, borderRadius: '50%',
+                                border: `3px solid ${accent}33`,
+                                borderTop: `3px solid ${accent}`,
+                                animation: 'spin 0.8s linear infinite',
+                            }} />
+                        </div>
+                    )}
+
                     <VideoPlayer
+                        key={swapCount}                         // ✅ remounts on every swap
                         ref={playerRef}
-                        streamUid={video.stream_uid}
+                        streamUid={currentStreamUid}
                         aspectRatio={video.aspect_ratio || '16:9'}
                         branding={{
                             primaryColor: accent,
                             fontFamily: font,
                             logoUrl: branding.logoUrl || '',
                             logoText: branding.logoText || '',
-                            showLogo: branding.showLogo ?? false, // logo inside player handled separately
+                            showLogo: branding.showLogo ?? false,
                             playerMode: branding.playerMode || 'standard',
                             bgColor: '#000',
                         }}
                         onTimeUpdate={handleTimeUpdate}
+                        onReady={handleReady}                   // ✅ now defined above
                     >
-                        {/* Element overlays */}
                         <PlayerOverlay
-                            elements={elements}
+                            elements={currentElements}
                             currentTimeRef={currentTimeRef}
                             containerRef={containerRef}
-                            videoId={video.id}
-                            workspaceId={workspace?.id || video.workspace_id}
+                            videoId={currentVideoId}
+                            workspaceId={workspace?.id}
                             playerRef={playerRef}
                             viewerIdentityRef={viewerIdentityRef}
+                            onRouteSwap={handleRouteSwap}
                         />
                     </VideoPlayer>
                 </div>
@@ -286,8 +339,7 @@ export default function WatchClient({ data, videoId }) {
             {lp.showCTA && lp.ctaText && (
                 <a
                     href={lp.ctaUrl || '#'}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    target="_blank" rel="noopener noreferrer"
                     style={{
                         display: 'inline-block', padding: '14px 32px',
                         borderRadius: 10, background: accent,
@@ -307,6 +359,7 @@ export default function WatchClient({ data, videoId }) {
                 </div>
             )}
 
+            <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         </div>
     )
 }

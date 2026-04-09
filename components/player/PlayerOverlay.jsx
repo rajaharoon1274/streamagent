@@ -9,6 +9,7 @@ export default function PlayerOverlay({
     workspaceId,
     playerRef,
     viewerIdentityRef,
+    onRouteSwap,
 }) {
     return (
         <OverlayRenderer
@@ -19,6 +20,7 @@ export default function PlayerOverlay({
             workspaceId={workspaceId}
             playerRef={playerRef}
             viewerIdentityRef={viewerIdentityRef}
+            onRouteSwap={onRouteSwap}
         />
     )
 }

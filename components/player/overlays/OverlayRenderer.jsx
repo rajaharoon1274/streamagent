@@ -10,6 +10,7 @@ import StickyBar from './StickyBar'
 import ShareSocial from './ShareSocial'
 import GateOverlay from '../gates/GateOverlay'
 import SurveyOverlay from '../surveys/SurveyOverlay'
+import ChoicePointOverlay from '../gates/ChoicePointOverlay'
 import MobCall from '../mobile/MobCall'
 import MobSms from '../mobile/MobSms'
 import MobShare from '../mobile/MobShare'
@@ -26,6 +27,7 @@ import { useInteractionTracker } from '@/lib/useInteractionTracker'
 const GATE_TYPES = new Set(['cta-email', 'cta-booking', 'cta-download', 'funnel-urgency'])
 const SURVEY_TYPES = new Set(['survey-poll', 'survey-rating', 'survey-nps'])
 const MOBILE_TYPES = new Set(['mob-call', 'mob-sms', 'mob-share', 'mob-vcard', 'mob-calendar', 'mob-directions', 'mob-swipe', 'mob-screenshot', 'mob-shake'])
+const CHOICE_TYPES = new Set(['choice-point'])
 
 // ── Animation definitions ─────────────────────────────────────────────────────
 const ANIM_IN = {
@@ -79,6 +81,7 @@ function ElementContent({ el }) {
     }
 }
 
+// ── isActive: for normal + mobile overlays only ───────────────────────────────
 function isActive(el, t) {
     const inTime = el.timing?.in ?? 0
     const duration = el.timing?.duration ?? 0
@@ -87,7 +90,7 @@ function isActive(el, t) {
     return true
 }
 
-// ── Animated wrapper for normal + mobile overlays ────────────────────────────
+// ── Animated wrapper for normal + mobile overlays ─────────────────────────────
 function AnimatedElement({ el, videoW, videoH, workspaceId, videoId }) {
     const [animStyle, setAnimStyle] = useState({})
     const [transition, setTransition] = useState('none')
@@ -124,10 +127,10 @@ function AnimatedElement({ el, videoW, videoH, workspaceId, videoId }) {
             ...(stickyPos === 'top' ? { top: 8 } : { bottom: 8 }),
         }
     } else if (isMob) {
-        // Mobile elements: centred at bottom of player
         posStyle = {
             position: 'absolute',
-            bottom: 56, left: '50%',
+            bottom: 56,
+            left: '50%',
             transform: 'translateX(-50%)',
             width: Math.min(videoW * 0.85, 360),
             zIndex: el.z_index ?? 40,
@@ -161,9 +164,7 @@ function AnimatedElement({ el, videoW, videoH, workspaceId, videoId }) {
         return () => { cancelAnimationFrame(rafId); clearTimeout(exitTimer.current) }
     }, []) // eslint-disable-line
 
-    const content = isMob
-        ? MobileContent({ el })
-        : ElementContent({ el })
+    const content = isMob ? MobileContent({ el }) : ElementContent({ el })
     if (!content) return null
 
     return (
@@ -171,7 +172,11 @@ function AnimatedElement({ el, videoW, videoH, workspaceId, videoId }) {
             onClick={() => {
                 if (p.url) {
                     window.open(p.url, p.openNewTab !== false ? '_blank' : '_self')
-                    trackInteraction({ elementId: el.id, interactionType: 'clicked', value: { url: p.url } })
+                    trackInteraction({
+                        elementId: el.id,
+                        interactionType: 'clicked',
+                        value: { url: p.url },
+                    })
                 }
             }}
             style={{
@@ -198,6 +203,8 @@ export default function OverlayRenderer({
     videoId,
     workspaceId,
     playerRef,
+    viewerIdentityRef,
+    onRouteSwap,        // ← Day 8: route swap callback
 }) {
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
     const [dismissedGates, setDismissedGates] = useState(new Set())
@@ -205,15 +212,22 @@ export default function OverlayRenderer({
     const [activeIds, setActiveIds] = useState(new Set())
     const [sessionKey, setSessionKey] = useState(0)
 
+    // ── Choice point state ────────────────────────────────────────────────────
+    const [triggeredChoices, setTriggeredChoices] = useState(new Set())
+    const [dismissedChoices, setDismissedChoices] = useState(new Set())
+    const [submittingChoice, setSubmittingChoice] = useState(null)
+
     const lastTimeRef = useRef(0)
     const firedGatesRef = useRef(new Set())
     const rafRef = useRef(null)
+
+    const { trackInteraction } = useInteractionTracker({ workspaceId, videoId })
 
     const handleDismissed = useCallback((elementId) => {
         setDismissedGates(prev => new Set([...prev, elementId]))
     }, [])
 
-    // Container size
+    // ── Container size ────────────────────────────────────────────────────────
     useEffect(() => {
         if (!containerRef?.current) return
         const obs = new ResizeObserver(entries => {
@@ -224,20 +238,24 @@ export default function OverlayRenderer({
         return () => obs.disconnect()
     }, [containerRef])
 
-    // RAF loop
+    // ── Main RAF loop ─────────────────────────────────────────────────────────
     useEffect(() => {
         function tick() {
             const t = currentTimeRef?.current ?? 0
 
+            // ── Replay detection ──────────────────────────────────────────────
             if (lastTimeRef.current > 1 && t < 0.3) {
+                console.log('[OverlayRenderer] Replay — resetting all triggers')
                 firedGatesRef.current = new Set()
                 setSessionKey(k => k + 1)
                 setTriggeredGates(new Set())
                 setDismissedGates(new Set())
+                setTriggeredChoices(new Set())
+                setDismissedChoices(new Set())
             }
             lastTimeRef.current = t
 
-            // Gate + survey gate trigger (one-shot)
+            // ── Gate + survey gate trigger (one-shot) ─────────────────────────
             for (const el of elements) {
                 const isGateable = GATE_TYPES.has(el.type) || SURVEY_TYPES.has(el.type)
                 if (
@@ -246,18 +264,34 @@ export default function OverlayRenderer({
                     !firedGatesRef.current.has(el.id) &&
                     t >= (el.timing?.in ?? 0)
                 ) {
+                    console.log('[OverlayRenderer] Gate triggered:', el.id)
                     firedGatesRef.current.add(el.id)
                     setTriggeredGates(prev => new Set([...prev, el.id]))
                 }
             }
 
-            // Normal overlay + non-gated survey active check
+            // ── Choice point trigger (one-shot) ───────────────────────────────
+            for (const el of elements) {
+                if (
+                    CHOICE_TYPES.has(el.type) &&
+                    !firedGatesRef.current.has(el.id) &&
+                    t >= (el.timing?.in ?? 0)
+                ) {
+                    console.log('[OverlayRenderer] Choice point triggered:', el.id, 'at t=', t.toFixed(2))
+                    firedGatesRef.current.add(el.id)
+                    setTriggeredChoices(prev => new Set([...prev, el.id]))
+                    // Always pause immediately
+                    try { playerRef?.current?.pause() } catch { }
+                }
+            }
+
+            // ── Normal overlay active check ───────────────────────────────────
             setActiveIds(prev => {
                 const next = new Set()
                 for (const el of elements) {
                     const isGateable = GATE_TYPES.has(el.type) || SURVEY_TYPES.has(el.type)
                     if (isGateable && el.gate?.enabled === true) continue
-                    // Mobile: check device conditions
+                    if (CHOICE_TYPES.has(el.type)) continue
                     if (MOBILE_TYPES.has(el.type) && !shouldShowElement(el)) continue
                     if (isActive(el, t)) next.add(el.id)
                 }
@@ -267,29 +301,74 @@ export default function OverlayRenderer({
 
             rafRef.current = requestAnimationFrame(tick)
         }
+
         rafRef.current = requestAnimationFrame(tick)
         return () => cancelAnimationFrame(rafRef.current)
-    }, [elements, currentTimeRef])
+    }, [elements, currentTimeRef]) // eslint-disable-line
+
+    // ── Choice selection handler ──────────────────────────────────────────────
+    const handleChoiceSelected = useCallback(async (el, choiceId, choiceText) => {
+        setSubmittingChoice(el.id)
+
+        // 1. Track interaction
+        await trackInteraction({
+            elementId: el.id,
+            interactionType: 'choice_selected',
+            value: {
+                choice_id: choiceId,
+                choice_text: choiceText,
+                element_type: 'choice-point',
+                at_seconds: Math.round(currentTimeRef?.current ?? 0),
+            },
+        })
+
+        // 2. Skip (allowSkip tapped) → resume
+        if (!choiceId) {
+            try { playerRef?.current?.play() } catch { }
+            setDismissedChoices(prev => new Set([...prev, el.id]))
+            setSubmittingChoice(null)
+            return
+        }
+
+        // 3. Resolve route edge
+        try {
+            const res = await fetch(
+                `/api/routes/resolve?workspace_id=${workspaceId}&element_id=${el.id}&choice_value=${encodeURIComponent(choiceId)}`
+            )
+            const data = await res.json()
+
+            if (data.target_video_id) {
+                // ── TC-05: Route found → swap video ───────────────────────────
+                console.log('[OverlayRenderer] Routing to video:', data.target_video_id)
+                setDismissedChoices(prev => new Set([...prev, el.id]))
+                await onRouteSwap?.(data.target_video_id)
+            } else {
+                // ── TC-05: No route → resume current video ────────────────────
+                console.log('[OverlayRenderer] No route for this choice — resuming')
+                try { playerRef?.current?.play() } catch { }
+                setDismissedChoices(prev => new Set([...prev, el.id]))
+            }
+        } catch (err) {
+            console.error('[OverlayRenderer] Route resolve error:', err)
+            try { playerRef?.current?.play() } catch { }
+            setDismissedChoices(prev => new Set([...prev, el.id]))
+        }
+
+        setSubmittingChoice(null)
+    }, [workspaceId, currentTimeRef, playerRef, onRouteSwap, trackInteraction])
 
     if (!dimensions.width) return null
 
-    // Normal + mobile overlays
+    // ── Derived render lists ──────────────────────────────────────────────────
     const activeElements = elements
         .filter(el => {
             const isGateable = GATE_TYPES.has(el.type) || SURVEY_TYPES.has(el.type)
             if (isGateable && el.gate?.enabled === true) return false
+            if (CHOICE_TYPES.has(el.type)) return false
             return activeIds.has(el.id)
         })
         .sort((a, b) => (a.z_index ?? 1) - (b.z_index ?? 1))
 
-    // Gate + survey gates triggered but not dismissed
-    const activeGates = elements.filter(el => {
-        const isGateable = GATE_TYPES.has(el.type) || SURVEY_TYPES.has(el.type)
-        return isGateable && el.gate?.enabled === true &&
-            triggeredGates.has(el.id) && !dismissedGates.has(el.id)
-    })
-
-    // Non-gated surveys
     const activeSurveys = elements.filter(el =>
         SURVEY_TYPES.has(el.type) &&
         el.gate?.enabled !== true &&
@@ -297,11 +376,30 @@ export default function OverlayRenderer({
         !dismissedGates.has(el.id)
     )
 
+    const activeGates = elements.filter(el => {
+        const isGateable = GATE_TYPES.has(el.type) || SURVEY_TYPES.has(el.type)
+        return isGateable &&
+            el.gate?.enabled === true &&
+            triggeredGates.has(el.id) &&
+            !dismissedGates.has(el.id)
+    })
+
+    const activeChoicePoints = elements.filter(el =>
+        CHOICE_TYPES.has(el.type) &&
+        triggeredChoices.has(el.id) &&
+        !dismissedChoices.has(el.id)
+    )
+
+    const hasBlockingOverlay =
+        activeSurveys.length > 0 ||
+        activeGates.length > 0 ||
+        activeChoicePoints.length > 0
+
     return (
         <>
-            {/* Standard + mobile overlays */}
+            {/* ── Standard + mobile overlays ── */}
             {activeElements
-                .filter(el => !SURVEY_TYPES.has(el.type))
+                .filter(el => !(MOBILE_TYPES.has(el.type) && hasBlockingOverlay))
                 .map(el => (
                     <AnimatedElement
                         key={`${sessionKey}-${el.id}`}
@@ -314,7 +412,7 @@ export default function OverlayRenderer({
                 ))
             }
 
-            {/* Non-gated surveys */}
+            {/* ── Non-gated surveys ── */}
             {activeSurveys.map(el => (
                 <SurveyOverlay
                     key={`${sessionKey}-${el.id}-survey`}
@@ -328,7 +426,7 @@ export default function OverlayRenderer({
                 />
             ))}
 
-            {/* Gated overlays (gates + gated surveys) */}
+            {/* ── Gated overlays (gates + gated surveys) ── */}
             {activeGates.map(el => {
                 if (SURVEY_TYPES.has(el.type)) {
                     return (
@@ -356,6 +454,18 @@ export default function OverlayRenderer({
                     />
                 )
             })}
+
+            {/* ── Choice Points — always on very top (z:100) ── */}
+            {activeChoicePoints.map(el => (
+                <ChoicePointOverlay
+                    key={`${sessionKey}-${el.id}-choice`}
+                    el={el}
+                    isSubmitting={submittingChoice === el.id}
+                    onChoiceSelected={(choiceId, choiceText) =>
+                        handleChoiceSelected(el, choiceId, choiceText)
+                    }
+                />
+            ))}
         </>
     )
 }
