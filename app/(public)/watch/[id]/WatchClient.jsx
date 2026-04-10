@@ -308,7 +308,7 @@ export default function WatchClient({ data, videoId }) {
                             bgColor: '#000',
                         }}
                         onTimeUpdate={handleTimeUpdate}
-                        onReady={handleReady}                   // ✅ now defined above
+                        onReady={handleReady}                   
                     >
                         <PlayerOverlay
                             elements={currentElements}
