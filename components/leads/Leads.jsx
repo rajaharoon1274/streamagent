@@ -1,600 +1,811 @@
 'use client'
-import { useState, useMemo } from 'react'
-import Icon from '@/components/ui/Icon'
-import { LEADS, VIDEOS } from '@/lib/mockData'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
+import { useApp } from '@/context/AppContext'
+import { useLeads, useLead, useLeadMutations } from '@/hooks/useLeads'
+import toast from 'react-hot-toast'
 
-/* ── Status colours (matches HTML buildLeads) ─────────────────────────────── */
-const ST = { New: '#4F6EF7', Contacted: '#F5A623', Qualified: '#1ED8A0', Closed: '#06B6D4' }
-
-function heatTag(pct) {
-  if (pct >= 80) return { label: 'Hot', color: '#FF6B6B' }
-  if (pct >= 50) return { label: 'Warm', color: '#F5A623' }
-  return { label: 'Cold', color: '#06B6D4' }
+/* ─── Helpers ─────────────────────────────────────────────────────────── */
+const STATUS_OPTIONS = ['New', 'Contacted', 'Qualified', 'Closed']
+const STATUS_COLORS = {
+  New: '#4F6EF7',
+  Contacted: '#F5A623',
+  Qualified: '#1ED8A0',
+  Closed: '#FF6B6B',
 }
 function scoreColor(sc) { return sc >= 80 ? '#1ED8A0' : sc >= 60 ? '#F5A623' : '#FF6B6B' }
-function initials(n) { return n.split(' ').map(w => w[0]).join('').slice(0, 2) }
-function shortDate(d) { return d.replace(' ago', '').replace('hours', 'h').replace('hour', 'h').replace('days', 'd').replace('day', 'd') }
+function initials(n) {
+  if (!n) return '?'
+  return n.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+}
+function timeAgo(dateStr) {
+  if (!dateStr) return '—'
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  if (days < 30) return `${days}d ago`
+  return new Date(dateStr).toLocaleDateString()
+}
+function formatDate(dateStr) {
+  if (!dateStr) return '—'
+  return new Date(dateStr).toLocaleString()
+}
 
-/* ══════════════════════════════════════════════════════════════════════════ */
+/* ─── MAIN COMPONENT ───────────���─────────────────────────────────────── */
 export default function Leads() {
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('all')
-  const [sort, setSort] = useState('newest')
-  const [selectMode, setSelectMode] = useState(false)
+  const { state, set } = useApp()
+
+  // ── Filter / pagination state ──
+  const [filters, setFilters] = useState({
+    status: 'all',
+    search: '',
+    video_id: '',
+    sort: 'newest',
+    page: 1,
+    limit: 25,
+  })
+
+  // Debounced search
+  const [searchInput, setSearchInput] = useState('')
+  const searchTimer = useRef(null)
+  const handleSearchChange = (val) => {
+    setSearchInput(val)
+    clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => {
+      setFilters(f => ({ ...f, search: val, page: 1 }))
+    }, 400)
+  }
+
+  // ── Data fetching ──
+  const { leads, total, page, totalPages, isLoading, mutate } = useLeads(filters)
+  const { updateLead, deleteLead, bulkUpdateStatus, bulkDelete, exportLeads, importLeads } = useLeadMutations()
+
+  // ── Selection state ──
   const [selectedIds, setSelectedIds] = useState([])
-  const [selectedLead, setSelectedLead] = useState(null)
-  const [smsModal, setSmsModal] = useState(null)
-  const [importModal, setImportModal] = useState(false)
+  const [selectAll, setSelectAll] = useState(false)
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false)
 
-  /* export CSV helper */
-  const exportLeadsCSV = (ids) => {
-    const rows = ids ? LEADS.filter(l => ids.includes(l.id)) : LEADS
-    const headers = ['Name','Email','Phone','Video','Status','Score','Watch %','Source','Campaign','Date']
-    let csv = headers.join(',') + '\n'
-    rows.forEach(l => {
-      csv += [l.name, l.email, l.phone, l.video, l.status, l.score, l.watchPct + '%', l.source, l.campaign, l.date]
-        .map(v => { const s = String(v || ''); return s.includes(',') || s.includes('"') ? '"' + s.replace(/"/g, '""') + '"' : s })
-        .join(',') + '\n'
-    })
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `streamagent-leads-${new Date().toISOString().slice(0, 10)}.csv`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+  // ── Detail drawer ──
+  const [detailId, setDetailId] = useState(null)
+  const { lead: detailLead, isLoading: detailLoading, mutate: mutateDetail } = useLead(detailId)
+
+  // ── Import modal ──
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const fileInputRef = useRef(null)
+
+  // ── Inline editing in drawer ──
+  const [editNotes, setEditNotes] = useState('')
+  const [editTags, setEditTags] = useState('')
+  const [editFollowUp, setEditFollowUp] = useState('')
+
+  // Sync edit fields when detail lead loads
+  useEffect(() => {
+    if (detailLead) {
+      setEditNotes(detailLead.notes || '')
+      setEditTags((detailLead.tags || []).join(', '))
+      setEditFollowUp(detailLead.follow_up_date || '')
+    }
+  }, [detailLead])
+
+  // ── Select all toggle ──
+  const toggleSelectAll = () => {
+    if (selectAll) {
+      setSelectedIds([])
+      setSelectAll(false)
+    } else {
+      setSelectedIds(leads.map(l => l.id))
+      setSelectAll(true)
+    }
+  }
+  const toggleCheck = (id) => {
+    setSelectedIds(p =>
+      p.includes(id) ? p.filter(x => x !== id) : [...p, id]
+    )
   }
 
-  /* stats */
-  const hotCount = LEADS.filter(l => l.watchPct >= 80 && l.status !== 'Closed').length
-  const avgScore = Math.round(LEADS.reduce((a, l) => a + l.score, 0) / LEADS.length)
-  const closedCount = LEADS.filter(l => l.status === 'Closed').length
-
-  /* filter + sort */
-  const sorted = useMemo(() => {
-    const out = LEADS.filter(l => {
-      if (filter !== 'all' && l.status !== filter) return false
-      if (search && !l.name.toLowerCase().includes(search.toLowerCase()) && !l.email.toLowerCase().includes(search.toLowerCase())) return false
-      return true
-    })
-    return [...out].sort((a, b) => {
-      if (sort === 'score') return b.score - a.score
-      if (sort === 'watch') return b.watchPct - a.watchPct
-      if (sort === 'followup') {
-        if (!a.followUp && !b.followUp) return 0
-        if (!a.followUp) return 1
-        if (!b.followUp) return -1
-        return new Date(a.followUp) - new Date(b.followUp)
-      }
-      return 0
-    })
-  }, [filter, search, sort])
-
-  const sel = selectedLead ? LEADS.find(l => l.id === selectedLead) : null
-
-  const toggleCheck = id => setSelectedIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
-  const handleRow = lead => {
-    if (selectMode) { toggleCheck(lead.id) } else { setSelectedLead(selectedLead === lead.id ? null : lead.id) }
+  // ── Handlers ──
+  const handleStatusChange = async (id, newStatus, prevStatus) => {
+    try {
+      await updateLead(id, { status: newStatus, _previous_status: prevStatus })
+      toast.success(`Status → ${newStatus}`)
+      mutate()
+      if (detailId === id) mutateDetail()
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
 
-  /* grid columns */
-  const cols = selectMode ? '24px 32px 1fr 120px 70px 70px 50px' : '32px 1fr 120px 70px 70px 50px'
+  const handleDeleteLead = async (id) => {
+    if (!confirm('Delete this lead permanently?')) return
+    try {
+      await deleteLead(id)
+      toast.success('Lead deleted')
+      setSelectedIds(p => p.filter(x => x !== id))
+      if (detailId === id) setDetailId(null)
+      mutate()
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  const handleSaveDetail = async () => {
+    if (!detailId) return
+    try {
+      const tags = editTags.split(',').map(t => t.trim()).filter(Boolean)
+      await updateLead(detailId, {
+        notes: editNotes || null,
+        tags,
+        follow_up_date: editFollowUp || null,
+      })
+      toast.success('Lead updated')
+      mutateDetail()
+      mutate()
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  // ── Bulk actions ──
+  const handleBulkStatus = async (status) => {
+    setBulkMenuOpen(false)
+    try {
+      await bulkUpdateStatus(selectedIds, status)
+      toast.success(`${selectedIds.length} leads → ${status}`)
+      setSelectedIds([])
+      setSelectAll(false)
+      mutate()
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    setBulkMenuOpen(false)
+    if (!confirm(`Delete ${selectedIds.length} leads permanently?`)) return
+    try {
+      await bulkDelete(selectedIds)
+      toast.success(`${selectedIds.length} leads deleted`)
+      setSelectedIds([])
+      setSelectAll(false)
+      if (selectedIds.includes(detailId)) setDetailId(null)
+      mutate()
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  const handleBulkExport = async () => {
+    setBulkMenuOpen(false)
+    try {
+      await exportLeads({ lead_ids: selectedIds })
+      toast.success('Export downloaded')
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  const handleExportAll = async () => {
+    try {
+      await exportLeads({
+        status: filters.status !== 'all' ? filters.status : undefined,
+        search: filters.search || undefined,
+        video_id: filters.video_id || undefined,
+      })
+      toast.success('Export downloaded')
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const result = await importLeads(file)
+      toast.success(
+        `Imported: ${result.imported}, Updated: ${result.updated}, Skipped: ${result.skipped}`
+      )
+      setImportModalOpen(false)
+      mutate()
+    } catch (err) {
+      toast.error(err.message)
+    }
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // ── Styles ──
+  const card = { background: '#1A1F2E', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)' }
+  const pill = (active) => ({
+    padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer',
+    background: active ? '#4F6EF7' : 'rgba(255,255,255,0.06)', color: active ? '#fff' : '#94A3B8',
+    border: 'none', transition: 'all .15s',
+  })
+  const btn = (bg = '#4F6EF7') => ({
+    padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+    background: bg, color: '#fff', border: 'none', cursor: 'pointer',
+  })
 
   return (
-    <div className="leads-wrap" style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <div style={{ padding: '28px 32px', maxWidth: 1440, margin: '0 auto' }}>
 
-      <style jsx global>{`
-        @media (max-width: 900px) {
-          .leads-table-wrapper {
-            overflow-x: auto !important;
-          }
-          .leads-row {
-            min-width: 800px;
-          }
-          .leads-table-header {
-            min-width: 800px;
-          }
-        }
-      `}</style>
-
-      {/* ═══ Left: list ═══ */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-        <div style={{ padding: '16px 20px 0', flexShrink: 0, background: 'var(--s1)' }}>
-
-          {/* ── stat bar ── */}
-          <div className="leads-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 14 }}>
-            {[
-              { label: 'TOTAL LEADS', value: LEADS.length, sub: 'This month', color: '#4F6EF7' },
-              { label: 'HOT LEADS', value: hotCount, sub: '80%+ watch depth', color: '#FF6B6B' },
-              { label: 'AVG SCORE', value: avgScore, sub: 'Across all leads', color: '#1ED8A0' },
-              { label: 'CLOSED', value: closedCount, sub: `${Math.round(closedCount / LEADS.length * 100)}% close rate`, color: '#06B6D4' },
-            ].map(s => (
-              <div key={s.label} style={{ background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 12, padding: '12px 14px' }}>
-                <div style={{ fontSize: 10, color: 'var(--t3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 6 }}>{s.label}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: s.color, letterSpacing: '-0.5px' }}>{s.value}</div>
-                <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 2 }}>{s.sub}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* ── toolbar ── */}
-          <div className="leads-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 9, padding: '7px 12px' }}>
-              <Icon name="search" size={13} color="var(--t3)" />
-              <input placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', fontSize: 12, color: 'var(--t1)', width: '100%', outline: 'none' }} />
-            </div>
-            <select value={sort} onChange={e => setSort(e.target.value)} style={{ padding: '7px 12px', borderRadius: 9, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t1)', fontSize: 11, cursor: 'pointer' }}>
-              <option value="newest">Newest</option>
-              <option value="score">Score</option>
-              <option value="watch">Watch %</option>
-              <option value="followup">Follow-up</option>
-            </select>
-            <button onClick={() => setImportModal(true)} className="hide-mobile" style={{ padding: '7px 13px', borderRadius: 9, background: 'rgba(79,110,247,0.1)', border: '1px solid rgba(79,110,247,0.25)', color: 'var(--acc)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Import</button>
-            <button onClick={() => exportLeadsCSV()} className="hide-mobile" style={{ padding: '7px 13px', borderRadius: 9, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Export</button>
-            <button onClick={() => { setSelectMode(!selectMode); if (selectMode) setSelectedIds([]) }} style={{ padding: '7px 13px', borderRadius: 9, background: selectMode ? 'rgba(79,110,247,0.12)' : 'var(--s3)', border: `1px solid ${selectMode ? 'var(--acc)' : 'var(--b2)'}`, color: selectMode ? 'var(--acc)' : 'var(--t2)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-              {selectMode ? '✓ Selecting' : 'Select'}
-            </button>
-          </div>
-
-          {/* ── bulk-action bar (select mode) ── */}
-          {selectMode && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 12px', background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 9 }}>
-              <button onClick={() => setSelectedIds(selectedIds.length === sorted.length ? [] : sorted.map(l => l.id))} style={{ padding: '5px 10px', borderRadius: 7, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>
-                {selectedIds.length === sorted.length ? 'Deselect All' : 'Select All'}
-              </button>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--acc)', flex: 1 }}>{selectedIds.length} selected</span>
-              {selectedIds.length > 0 && (
-                <>
-                  <button onClick={() => exportLeadsCSV(selectedIds)} style={{ padding: '5px 12px', borderRadius: 7, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>Export CSV</button>
-                  <button onClick={() => { setSelectedIds([]); setSelectMode(false) }} style={{ padding: '5px 12px', borderRadius: 7, background: 'rgba(255,107,107,0.1)', border: '1px solid rgba(255,107,107,0.25)', color: 'var(--red)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>Delete</button>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* ── filter tabs ── */}
-          <div className="leads-filters" style={{ display: 'flex', gap: 4, marginBottom: 2 }}>
-            {['all', 'New', 'Contacted', 'Qualified', 'Closed'].map(f => {
-              const count = f === 'all' ? LEADS.length : LEADS.filter(l => l.status === f).length
-              const active = filter === f
-              const c = f === 'all' ? '#4F6EF7' : ST[f]
-              return (
-                <button key={f} onClick={() => setFilter(f)} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 11, fontWeight: active ? 700 : 500, cursor: 'pointer', background: active ? `${c}18` : 'transparent', color: active ? c : 'var(--t3)', border: `1px solid ${active ? `${c}44` : 'transparent'}`, transition: 'all 0.15s' }}>
-                  {f === 'all' ? 'All' : f} <span style={{ opacity: 0.6 }}>{count}</span>
-                </button>
-              )
-            })}
-          </div>
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div>
+          <h1 style={{ fontSize: 26, fontWeight: 700, color: '#fff', margin: 0 }}>Leads</h1>
+          <p style={{ fontSize: 14, color: '#64748B', margin: '4px 0 0' }}>
+            {total} total lead{total !== 1 ? 's' : ''}
+          </p>
         </div>
-
-        {/* ── table ── */}
-        <div className="leads-table-wrapper" style={{ flex: 1, overflowY: 'auto', padding: '8px 20px 20px' }}>
-          {/* header */}
-          <div className="leads-table-header" style={{ display: 'grid', gridTemplateColumns: cols, gap: 10, alignItems: 'center', padding: '8px 12px', fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.4px', borderBottom: '1px solid var(--b1)' }}>
-            {selectMode && <div />}
-            <div /><div>Lead</div><div className="hide-mobile">Video</div><div className="hide-mobile">Watch</div><div>Score</div><div />
-          </div>
-
-          {sorted.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: 'var(--t3)' }}>No leads match your filters</div>}
-
-          {/* rows */}
-          {sorted.map(lead => {
-            const isSel = selectedLead === lead.id
-            const sc = lead.score
-            const scCol = scoreColor(sc)
-            const ht = heatTag(lead.watchPct)
-            const stColor = ST[lead.status]
-            const isChecked = selectedIds.includes(lead.id)
-
-            return (
-              <div key={lead.id} onClick={() => handleRow(lead)} className="leads-row" style={{ display: 'grid', gridTemplateColumns: cols, gap: 10, alignItems: 'center', padding: '10px 12px', borderRadius: 10, marginTop: 4, cursor: 'pointer', background: isSel ? 'rgba(79,110,247,0.08)' : 'transparent', border: `1px solid ${isSel ? 'var(--acc)' : 'transparent'}`, transition: 'all 0.12s' }}
-                onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'var(--s2)' }}
-                onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent' }}
-              >
-                {selectMode && (
-                  <div onClick={e => { e.stopPropagation(); toggleCheck(lead.id) }} style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${isChecked ? 'var(--acc)' : 'var(--b2)'}`, background: isChecked ? 'var(--acc)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
-                    {isChecked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><polyline points="20,6 9,17 4,12" /></svg>}
-                  </div>
-                )}
-
-                {/* avatar */}
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: `${stColor}18`, border: `1.5px solid ${stColor}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, color: stColor }}>{initials(lead.name)}</div>
-
-                {/* name + badge + email */}
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.name}</span>
-                    <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 7px', borderRadius: 100, background: `${stColor}18`, color: stColor, flexShrink: 0 }}>{lead.status}</span>
-                    {lead.rewatched && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 7px', borderRadius: 100, background: 'rgba(168,85,247,0.1)', color: '#A855F7', flexShrink: 0 }}>Re-watch</span>}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.email}{lead.source ? ` · ${lead.source}` : ''}</div>
-                </div>
-
-                {/* video */}
-                <div className="hide-mobile" style={{ fontSize: 10, color: 'var(--t2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lead.video}</div>
-
-                {/* watch */}
-                <div className="hide-mobile" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--s4)', overflow: 'hidden' }}>
-                    <div style={{ width: `${lead.watchPct}%`, height: '100%', background: ht.color, borderRadius: 2 }} />
-                  </div>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: ht.color }}>{lead.watchPct}%</span>
-                </div>
-
-                {/* score */}
-                <div style={{ fontSize: 14, fontWeight: 800, color: scCol }}>{sc}</div>
-
-                {/* date */}
-                <div style={{ fontSize: 10, color: 'var(--t3)', textAlign: 'right' }}>{shortDate(lead.date)}</div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* ═══ Right: detail panel ═══ */}
-      <div className="leads-detail-panel" style={{ width: 360, borderLeft: '1px solid var(--b1)', display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden', background: 'var(--s1)' }}>
-        {!sel ? <EmptyDetail /> : <LeadDetail key={sel.id} lead={sel} onTextVideo={l => setSmsModal({ name: l.name, phone: l.phone, video: l.video })} />}
-      </div>
-
-      {/* ═══ SMS modal ═══ */}
-      {smsModal && <SmsModal data={smsModal} onClose={() => setSmsModal(null)} />}
-
-      {/* ═══ Import CSV modal ═══ */}
-      {importModal && <ImportCSVModal onClose={() => setImportModal(false)} />}
-    </div>
-  )
-}
-
-/* ══════════════════════════════════════════════════════════════════════════ */
-/* Empty state */
-/* ══════════════════════════════════════════════════════════════════════════ */
-function EmptyDetail() {
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 32, textAlign: 'center' }}>
-      <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--s3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" strokeWidth="1.5" strokeLinecap="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-      </div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t2)', marginBottom: 4 }}>Select a lead</div>
-      <div style={{ fontSize: 11, color: 'var(--t3)' }}>Click any lead to view their full profile, video activity, and timeline</div>
-    </div>
-  )
-}
-
-/* ══════════════════════════════════════════════════════════════════════════ */
-/* Lead detail panel */
-/* ══════════════════════════════════════════════════════════════════════════ */
-function LeadDetail({ lead, onTextVideo }) {
-  const [notes, setNotes] = useState(lead.notes || '')
-  const [saved, setSaved] = useState(false)
-  const stColor = ST[lead.status]
-  const scCol = scoreColor(lead.score)
-  const ht = heatTag(lead.watchPct)
-  const isOverdue = lead.followUp && new Date(lead.followUp) < new Date()
-
-  const timeline = [
-    { icon: '⚡', label: 'Email captured', detail: `Submitted at ${lead.watchPct}% watch depth`, time: lead.date, color: '#FF6B6B' },
-    { icon: '⑂', label: `Branch: ${lead.branch}`, detail: `${lead.branch} path selected`, time: lead.date, color: '#A855F7' },
-    { icon: '▶', label: 'Video started', detail: lead.video, time: lead.date, color: '#4F6EF7' },
-    ...(lead.rewatched ? [{ icon: '🔁', label: 'Re-watched', detail: 'Returned for second view', time: '1 day ago', color: '#A855F7' }] : []),
-  ]
-
-  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 1500) }
-
-  return (
-    <>
-      {/* ── header ── */}
-      <div style={{ padding: 20, background: `linear-gradient(180deg, ${stColor}08 0%, transparent 100%)`, borderBottom: '1px solid var(--b1)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-          <div style={{ width: 52, height: 52, borderRadius: '50%', background: `${stColor}22`, border: `2px solid ${stColor}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: stColor }}>{initials(lead.name)}</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--t1)' }}>{lead.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: 1 }}>{lead.email}</div>
-            {lead.phone && <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 1 }}>{lead.phone}</div>}
-          </div>
-        </div>
-
-        {/* status + score */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <select defaultValue={lead.status} style={{ flex: 1, padding: '8px 12px', borderRadius: 9, background: `${stColor}15`, border: `1px solid ${stColor}44`, color: stColor, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            {['New', 'Contacted', 'Qualified', 'Closed'].map(s => <option key={s}>{s}</option>)}
-          </select>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 9, background: 'var(--s2)', border: '1px solid var(--b2)' }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: `conic-gradient(${scCol} ${lead.score * 3.6}deg, var(--s4) 0deg)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--s2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: scCol }}>{lead.score}</div>
-            </div>
-            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--t3)' }}>Score</span>
-          </div>
-        </div>
-
-        {/* action buttons */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-          <button style={{ padding: 9, borderRadius: 9, background: 'var(--acc)', border: 'none', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>✉️ Email</button>
-          {lead.phone ? (
-            <button onClick={() => onTextVideo(lead)} style={{ padding: 9, borderRadius: 9, background: 'linear-gradient(135deg,#10B981,#06B6D4)', border: 'none', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>📲 Text Video</button>
-          ) : (
-            <button disabled style={{ padding: 9, borderRadius: 9, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t3)', fontSize: 11, fontWeight: 600, opacity: 0.5, cursor: 'default' }}>📲 No Phone</button>
-          )}
-        </div>
-      </div>
-
-      {/* ── scrollable content ── */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-
-        {/* video activity */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--b1)' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Video Activity</div>
-          <div style={{ background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 11, overflow: 'hidden' }}>
-            <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--b1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)' }}>{lead.video}</span>
-              <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--acc)' }}>{lead.branch}</span>
-            </div>
-            <div style={{ padding: '10px 12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: 10, color: 'var(--t3)' }}>Watch depth</span>
-                <span style={{ fontSize: 12, fontWeight: 800, color: ht.color }}>{lead.watchPct}%</span>
-              </div>
-              <div style={{ height: 6, borderRadius: 3, background: 'var(--s4)', overflow: 'hidden', marginBottom: 8 }}>
-                <div style={{ height: '100%', width: `${lead.watchPct}%`, background: `linear-gradient(90deg,${ht.color}88,${ht.color})`, borderRadius: 3 }} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 10 }}>
-                <div style={{ padding: '6px 8px', background: 'var(--s3)', borderRadius: 7 }}>
-                  <span style={{ color: 'var(--t3)' }}>Source</span><br />
-                  <span style={{ fontWeight: 600, color: 'var(--t1)' }}>{lead.source || 'Direct'}</span>
-                </div>
-                <div style={{ padding: '6px 8px', background: 'var(--s3)', borderRadius: 7 }}>
-                  <span style={{ color: 'var(--t3)' }}>{lead.campaign ? 'Campaign' : 'Captured'}</span><br />
-                  <span style={{ fontWeight: 600, color: 'var(--t1)' }}>{lead.campaign || lead.date}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* follow-up */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--b1)' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Follow-up</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input type="date" defaultValue={lead.followUp || ''} style={{ flex: 1, padding: '8px 10px', borderRadius: 9, background: 'var(--s2)', border: '1px solid var(--b2)', color: 'var(--t1)', fontSize: 11, cursor: 'pointer' }} />
-            {lead.followUp && (
-              <div style={{ fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 8, background: isOverdue ? 'rgba(255,107,107,0.1)' : 'rgba(245,166,35,0.1)', color: isOverdue ? '#FF6B6B' : '#F5A623', border: `1px solid ${isOverdue ? 'rgba(255,107,107,0.2)' : 'rgba(245,166,35,0.2)'}` }}>
-                {isOverdue ? 'Overdue' : 'Upcoming'}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* timeline */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--b1)' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Timeline</div>
-          {timeline.map((a, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <div style={{ width: 24, height: 24, borderRadius: 6, background: `${a.color}15`, border: `1px solid ${a.color}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>{a.icon}</div>
-                {i < timeline.length - 1 && <div style={{ width: 1, flex: 1, background: 'var(--b1)', margin: '3px 0', minHeight: 16 }} />}
-              </div>
-              <div style={{ paddingBottom: i < timeline.length - 1 ? 12 : 0 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t1)' }}>{a.label}</div>
-                <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 1 }}>{a.detail}</div>
-                <div style={{ fontSize: 9, color: 'var(--t3)', marginTop: 2, opacity: 0.6 }}>{a.time}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* notes */}
-        <div style={{ padding: '16px 20px' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Notes</div>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Add notes about this lead…" style={{ width: '100%', height: 80, padding: '10px 12px', borderRadius: 9, background: 'var(--s2)', border: '1px solid var(--b2)', color: 'var(--t1)', fontSize: 11, resize: 'none', lineHeight: 1.6, outline: 'none', boxSizing: 'border-box' }} />
-          <button onClick={handleSave} style={{ width: '100%', padding: 9, borderRadius: 9, background: saved ? 'var(--grn)' : 'var(--acc)', color: saved ? '#071a14' : '#fff', fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer', marginTop: 6 }}>
-            {saved ? '✓ Saved' : 'Save Note'}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button style={btn('rgba(255,255,255,0.08)')} onClick={() => setImportModalOpen(true)}>
+            ⬆ Import CSV
+          </button>
+          <button style={btn('rgba(255,255,255,0.08)')} onClick={handleExportAll}>
+            ⬇ Export CSV
           </button>
         </div>
       </div>
-    </>
-  )
-}
 
-/* ══════════════════════════════════════════════════════════════════════════ */
-/* SMS modal (matches buildSmsModal) */
-/* ══════════════════════════════════════════════════════════════════════════ */
-function SmsModal({ data, onClose }) {
-  const firstName = data.name ? data.name.split(' ')[0] : ''
-  const selVid = VIDEOS.find(v => v.title === data.video) || VIDEOS[0]
-  const defaultUrl = `https://stream.agent/v/${selVid.id}?name=${encodeURIComponent(firstName)}`
+      {/* ── Filters Bar ── */}
+      <div style={{ ...card, padding: '14px 20px', marginBottom: 20, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Status pills */}
+        {['all', ...STATUS_OPTIONS].map(s => (
+          <button key={s} style={pill(filters.status === s)}
+            onClick={() => setFilters(f => ({ ...f, status: s, page: 1 }))}>
+            {s === 'all' ? 'All' : s}
+          </button>
+        ))}
 
-  const [phone, setPhone] = useState(data.phone || '')
-  const [message, setMessage] = useState(`Hey ${firstName}, I put together a quick video for you. Check it out here: ${defaultUrl}`)
-  const [sent, setSent] = useState(false)
+        <div style={{ flex: 1 }} />
 
-  const handleVideoChange = e => {
-    const url = e.target.value
-    setMessage(prev => {
-      const m = prev.match(/https:\/\/stream\.agent\/v\/\S+/)
-      return m ? prev.replace(m[0], url) : prev + '\n' + url
-    })
-  }
+        {/* Search */}
+        <input
+          placeholder="Search name, email, phone…"
+          value={searchInput}
+          onChange={e => handleSearchChange(e.target.value)}
+          style={{
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 8, padding: '8px 14px', color: '#fff', fontSize: 13, width: 240,
+            outline: 'none',
+          }}
+        />
 
-  const handleSend = () => { setSent(true); setTimeout(onClose, 1500) }
-
-  return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--s1)', border: '1px solid var(--b2)', borderRadius: 16, width: 400, maxWidth: '90vw', boxShadow: '0 24px 64px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
-        <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--b1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 18 }}>📲</span><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>Text Video to {data.name}</div></div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--t3)', fontSize: 16, cursor: 'pointer' }}>✕</button>
-        </div>
-        <div style={{ padding: 20 }}>
-          <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 4 }}>Phone Number</label>
-          <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="(555) 555-0000" style={{ width: '100%', marginBottom: 12, fontSize: 13, padding: '10px 12px', borderRadius: 8, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t1)', outline: 'none', boxSizing: 'border-box' }} />
-
-          <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 4 }}>Video</label>
-          <select defaultValue={defaultUrl} onChange={handleVideoChange} style={{ width: '100%', background: 'var(--s3)', border: '1px solid var(--b2)', borderRadius: 8, padding: '8px 10px', fontSize: 12, color: 'var(--t1)', cursor: 'pointer', marginBottom: 12 }}>
-            {VIDEOS.map(vid => {
-              const url = `https://stream.agent/v/${vid.id}?name=${encodeURIComponent(firstName)}`
-              return <option key={vid.id} value={url}>{vid.title} ({vid.dur})</option>
-            })}
-          </select>
-
-          <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 4 }}>Message</label>
-          <textarea value={message} onChange={e => setMessage(e.target.value)} style={{ width: '100%', background: 'var(--s3)', border: '1px solid var(--b2)', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: 'var(--t1)', resize: 'vertical', minHeight: 80, boxSizing: 'border-box', outline: 'none' }} />
-          <div style={{ fontSize: 9, color: 'var(--t3)', marginTop: 6, marginBottom: 14, lineHeight: 1.4 }}>🔗 Video link auto-includes personalization. Sent via Twilio.</div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleSend} style={{ flex: 1, padding: 10, borderRadius: 9, background: 'linear-gradient(135deg,#10B981,#06B6D4)', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{sent ? '✓ Sent!' : '📲 Send Text'}</button>
-            <button onClick={onClose} style={{ padding: '10px 16px', borderRadius: 9, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
-          </div>
-        </div>
+        {/* Sort */}
+        <select
+          value={filters.sort}
+          onChange={e => setFilters(f => ({ ...f, sort: e.target.value, page: 1 }))}
+          style={{
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none',
+          }}
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="score_high">Score ↑</option>
+          <option value="score_low">Score ↓</option>
+          <option value="name_az">Name A–Z</option>
+          <option value="name_za">Name Z–A</option>
+        </select>
       </div>
-    </div>
-  )
-}
 
-/* ══════════════════════════════════════════════════════════════════════════ */
-/* Import CSV modal (matches openImportCSVModal) */
-/* ══════════════════════════════════════════════════════════════════════════ */
-function ImportCSVModal({ onClose }) {
-  const [dragOver, setDragOver] = useState(false)
-  const [parsedRows, setParsedRows] = useState(null)
-  const [headers, setHeaders] = useState([])
-  const [colMap, setColMap] = useState({ name: '', email: '', phone: '', source: '' })
-  const [toast, setToast] = useState(null)
-  const fileRef = { current: null }
-
-  const FIELDS = [
-    { key: 'name', label: 'Name', auto: ['name', 'full name', 'full_name', 'contact', 'first name'] },
-    { key: 'email', label: 'Email', auto: ['email', 'email address', 'email_address', 'e-mail'] },
-    { key: 'phone', label: 'Phone', auto: ['phone', 'phone number', 'mobile', 'cell'] },
-    { key: 'source', label: 'Source', auto: ['source', 'channel', 'utm_source', 'lead source'] },
-  ]
-
-  const parseFile = file => {
-    const reader = new FileReader()
-    reader.onload = ev => {
-      const text = ev.target.result
-      const sep = text.indexOf('\t') > -1 && text.indexOf(',') === -1 ? '\t' : ','
-      const lines = text.split(/\r?\n/).filter(l => l.trim())
-      if (lines.length < 2) return
-      const hdrs = lines[0].split(sep).map(h => h.replace(/^["']|["']$/g, '').trim())
-      const rows = []
-      for (let i = 1; i < lines.length; i++) {
-        const vals = lines[i].split(sep).map(v => v.replace(/^["']|["']$/g, '').trim())
-        const row = {}
-        hdrs.forEach((h, j) => { row[h] = vals[j] || '' })
-        rows.push(row)
-      }
-      setHeaders(hdrs)
-      setParsedRows(rows)
-      /* auto-map columns */
-      const map = { name: '', email: '', phone: '', source: '' }
-      FIELDS.forEach(f => {
-        hdrs.forEach(h => { if (f.auto.includes(h.toLowerCase())) map[f.key] = h })
-      })
-      setColMap(map)
-    }
-    reader.readAsText(file)
-  }
-
-  const handleImport = () => {
-    if (!parsedRows || !colMap.email) return
-    let imported = 0
-    parsedRows.forEach(row => {
-      const email = colMap.email ? row[colMap.email] : ''
-      if (!email) return
-      const name = colMap.name ? row[colMap.name] : ''
-      if (LEADS.some(l => l.email.toLowerCase() === email.toLowerCase())) return
-      LEADS.push({
-        id: LEADS.length + 100, name: name || email.split('@')[0], email,
-        phone: colMap.phone ? row[colMap.phone] : '',
-        video: 'Imported', status: 'New', tags: ['CSV Import'], score: 0, watchPct: 0,
-        source: colMap.source ? row[colMap.source] : 'CSV Import',
-        campaign: '', date: 'Just now', branch: '', notes: '', followUp: null, rewatched: false,
-      })
-      imported++
-    })
-    setToast(`${imported} lead${imported !== 1 ? 's' : ''} imported`)
-    setTimeout(onClose, 1800)
-  }
-
-  const hasEmail = !!colMap.email
-
-  return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--s1)', border: '1px solid var(--b2)', borderRadius: 18, padding: 28, maxWidth: 520, width: '90%', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}>
-
-        {/* header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(79,110,247,0.12)', border: '1px solid rgba(79,110,247,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📁</div>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--t1)' }}>Import Leads from CSV</div>
-            <div style={{ fontSize: 11, color: 'var(--t3)' }}>Upload a .csv file with your lead database</div>
-          </div>
-        </div>
-
-        {/* drop zone (hidden after parse) */}
-        {!parsedRows && (
-          <div
-            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files[0]) parseFile(e.dataTransfer.files[0]) }}
-            onClick={() => fileRef.current?.click()}
-            style={{ border: `2px dashed ${dragOver ? 'var(--acc)' : 'var(--b2)'}`, borderRadius: 12, padding: '32px 20px', textAlign: 'center', marginBottom: 16, cursor: 'pointer', transition: 'border-color 0.15s' }}
-          >
-            <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.4 }}>📄</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t2)', marginBottom: 4 }}>Drop your CSV file here</div>
-            <div style={{ fontSize: 11, color: 'var(--t3)' }}>or <span style={{ color: 'var(--acc)', textDecoration: 'underline', cursor: 'pointer' }}>browse to select</span></div>
-            <input ref={el => fileRef.current = el} type="file" accept=".csv,.tsv,.txt" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) parseFile(e.target.files[0]) }} />
-          </div>
-        )}
-
-        {/* preview + column mapping */}
-        {parsedRows && (
-          <>
-            {/* preview table */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', marginBottom: 8 }}>{parsedRows.length} leads found</div>
-              <div style={{ maxHeight: 100, overflowY: 'auto', border: '1px solid var(--b2)', borderRadius: 8, fontSize: 10 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>{headers.map(h => <th key={h} style={{ padding: '4px 8px', textAlign: 'left', borderBottom: '1px solid var(--b1)', fontWeight: 700, color: 'var(--t1)', whiteSpace: 'nowrap' }}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {parsedRows.slice(0, 3).map((row, i) => (
-                      <tr key={i}>{headers.map(h => <td key={h} style={{ padding: '3px 8px', borderBottom: '1px solid var(--b1)', color: 'var(--t2)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{(row[h] || '').substring(0, 30)}</td>)}</tr>
-                    ))}
-                  </tbody>
-                </table>
+      {/* ── Bulk Actions Bar ── */}
+      {selectedIds.length > 0 && (
+        <div style={{
+          ...card, padding: '10px 20px', marginBottom: 16,
+          display: 'flex', alignItems: 'center', gap: 14,
+          background: 'rgba(79,110,247,0.1)', borderColor: 'rgba(79,110,247,0.3)',
+        }}>
+          <span style={{ fontSize: 13, color: '#94A3B8' }}>
+            {selectedIds.length} selected
+          </span>
+          <div style={{ position: 'relative' }}>
+            <button style={btn()} onClick={() => setBulkMenuOpen(p => !p)}>
+              Bulk Actions ▾
+            </button>
+            {bulkMenuOpen && (
+              <div style={{
+                position: 'absolute', top: '110%', left: 0, zIndex: 50,
+                background: '#1E2536', borderRadius: 10, padding: 6,
+                border: '1px solid rgba(255,255,255,0.1)', minWidth: 180,
+                boxShadow: '0 8px 24px rgba(0,0,0,.4)',
+              }}>
+                {STATUS_OPTIONS.map(s => (
+                  <button key={s} onClick={() => handleBulkStatus(s)}
+                    style={{
+                      display: 'block', width: '100%', padding: '8px 14px', fontSize: 13,
+                      background: 'transparent', color: '#E2E8F0', border: 'none',
+                      textAlign: 'left', cursor: 'pointer', borderRadius: 6,
+                    }}
+                    onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.06)'}
+                    onMouseLeave={e => e.target.style.background = 'transparent'}
+                  >
+                    Set → {s}
+                  </button>
+                ))}
+                <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.08)', margin: '4px 0' }} />
+                <button onClick={handleBulkExport}
+                  style={{
+                    display: 'block', width: '100%', padding: '8px 14px', fontSize: 13,
+                    background: 'transparent', color: '#E2E8F0', border: 'none',
+                    textAlign: 'left', cursor: 'pointer', borderRadius: 6,
+                  }}
+                  onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.06)'}
+                  onMouseLeave={e => e.target.style.background = 'transparent'}
+                >
+                  ⬇ Export Selected
+                </button>
+                <button onClick={handleBulkDelete}
+                  style={{
+                    display: 'block', width: '100%', padding: '8px 14px', fontSize: 13,
+                    background: 'transparent', color: '#FF6B6B', border: 'none',
+                    textAlign: 'left', cursor: 'pointer', borderRadius: 6,
+                  }}
+                  onMouseEnter={e => e.target.style.background = 'rgba(255,69,69,0.1)'}
+                  onMouseLeave={e => e.target.style.background = 'transparent'}
+                >
+                  🗑 Delete Selected
+                </button>
               </div>
-            </div>
+            )}
+          </div>
+          <button style={{ ...btn('transparent'), color: '#94A3B8', fontSize: 12 }}
+            onClick={() => { setSelectedIds([]); setSelectAll(false) }}>
+            Clear
+          </button>
+        </div>
+      )}
 
-            {/* column mapping */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', marginBottom: 8 }}>Map columns</div>
-              {FIELDS.map(f => (
-                <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t2)', width: 80 }}>{f.label}</span>
-                  <select value={colMap[f.key]} onChange={e => setColMap(p => ({ ...p, [f.key]: e.target.value }))} style={{ flex: 1, padding: '5px 8px', borderRadius: 7, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t1)', fontSize: 11 }}>
-                    <option value="">-- skip --</option>
-                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </>
+      {/* ── Table ── */}
+      <div style={{ ...card, overflow: 'hidden' }}>
+        {/* Header Row */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '44px 2fr 2fr 1fr 80px 1fr 100px 80px',
+          padding: '12px 20px', fontSize: 12, fontWeight: 600, color: '#64748B',
+          borderBottom: '1px solid rgba(255,255,255,0.06)', textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+        }}>
+          <div>
+            <input type="checkbox" checked={selectAll} onChange={toggleSelectAll}
+              style={{ accentColor: '#4F6EF7', cursor: 'pointer' }} />
+          </div>
+          <div>Name</div>
+          <div>Email</div>
+          <div>Status</div>
+          <div>Score</div>
+          <div>Video</div>
+          <div>Captured</div>
+          <div></div>
+        </div>
+
+        {/* Loading */}
+        {isLoading && (
+          <div style={{ padding: 40, textAlign: 'center', color: '#64748B', fontSize: 14 }}>
+            Loading leads…
+          </div>
         )}
 
-        {/* actions */}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={onClose} style={{ flex: 1, padding: 12, borderRadius: 10, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={handleImport} style={{ flex: 1, padding: 12, borderRadius: 10, background: 'var(--acc)', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: hasEmail && parsedRows ? 1 : 0.4, pointerEvents: hasEmail && parsedRows ? 'auto' : 'none' }}>Import Leads</button>
-        </div>
+        {/* Empty */}
+        {!isLoading && leads.length === 0 && (
+          <div style={{ padding: 60, textAlign: 'center', color: '#64748B' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📭</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: '#94A3B8' }}>No leads found</div>
+            <div style={{ fontSize: 13, marginTop: 4 }}>Leads will appear here when viewers submit gates on your videos.</div>
+          </div>
+        )}
+
+        {/* Rows */}
+        {leads.map(lead => (
+          <div key={lead.id}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '44px 2fr 2fr 1fr 80px 1fr 100px 80px',
+              padding: '14px 20px', fontSize: 13, color: '#E2E8F0',
+              borderBottom: '1px solid rgba(255,255,255,0.04)',
+              cursor: 'pointer', transition: 'background .1s',
+              background: selectedIds.includes(lead.id) ? 'rgba(79,110,247,0.06)' : 'transparent',
+            }}
+            onMouseEnter={e => { if (!selectedIds.includes(lead.id)) e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
+            onMouseLeave={e => { if (!selectedIds.includes(lead.id)) e.currentTarget.style.background = 'transparent' }}
+            onClick={() => setDetailId(lead.id)}
+          >
+            <div onClick={e => e.stopPropagation()}>
+              <input type="checkbox" checked={selectedIds.includes(lead.id)}
+                onChange={() => toggleCheck(lead.id)}
+                style={{ accentColor: '#4F6EF7', cursor: 'pointer' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: '50%', display: 'flex',
+                alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700,
+                background: 'rgba(79,110,247,0.15)', color: '#4F6EF7', flexShrink: 0,
+              }}>
+                {initials(lead.name || lead.email)}
+              </div>
+              <span style={{ fontWeight: 500 }}>{lead.name || '—'}</span>
+            </div>
+            <div style={{ color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {lead.email || '—'}
+            </div>
+            <div onClick={e => e.stopPropagation()}>
+              <select
+                value={lead.status}
+                onChange={e => handleStatusChange(lead.id, e.target.value, lead.status)}
+                style={{
+                  background: `${STATUS_COLORS[lead.status]}22`,
+                  color: STATUS_COLORS[lead.status],
+                  border: `1px solid ${STATUS_COLORS[lead.status]}44`,
+                  borderRadius: 6, padding: '3px 8px', fontSize: 12,
+                  fontWeight: 600, cursor: 'pointer', outline: 'none',
+                }}
+              >
+                {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <span style={{
+                color: scoreColor(lead.score), fontWeight: 700, fontSize: 14,
+              }}>
+                {lead.score}
+              </span>
+            </div>
+            <div style={{ color: '#94A3B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {lead.videos?.title || '—'}
+            </div>
+            <div style={{ color: '#64748B', fontSize: 12 }}>
+              {timeAgo(lead.created_at)}
+            </div>
+            <div onClick={e => e.stopPropagation()}>
+              <button
+                onClick={() => handleDeleteLead(lead.id)}
+                style={{
+                  background: 'transparent', border: 'none', color: '#64748B',
+                  cursor: 'pointer', fontSize: 16, padding: '2px 6px', borderRadius: 4,
+                }}
+                title="Delete lead"
+                onMouseEnter={e => e.target.style.color = '#FF6B6B'}
+                onMouseLeave={e => e.target.style.color = '#64748B'}
+              >
+                🗑
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* toast */}
-      {toast && (
-        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', padding: '12px 24px', borderRadius: 10, background: '#1ED8A0', color: '#fff', fontSize: 13, fontWeight: 700, zIndex: 99999, boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>{toast}</div>
+      {/* ── Pagination ── */}
+      {totalPages > 1 && (
+        <div style={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          gap: 12, marginTop: 20,
+        }}>
+          <button
+            disabled={page <= 1}
+            onClick={() => setFilters(f => ({ ...f, page: f.page - 1 }))}
+            style={{
+              ...btn('rgba(255,255,255,0.08)'),
+              opacity: page <= 1 ? 0.4 : 1,
+              cursor: page <= 1 ? 'not-allowed' : 'pointer',
+            }}
+          >
+            ← Prev
+          </button>
+          <span style={{ color: '#94A3B8', fontSize: 13 }}>
+            Page {page} of {totalPages}
+          </span>
+          <button
+            disabled={page >= totalPages}
+            onClick={() => setFilters(f => ({ ...f, page: f.page + 1 }))}
+            style={{
+              ...btn('rgba(255,255,255,0.08)'),
+              opacity: page >= totalPages ? 0.4 : 1,
+              cursor: page >= totalPages ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Next →
+          </button>
+        </div>
+      )}
+
+      {/* ─── DETAIL DRAWER ──────────────────────────────────────────────── */}
+      {detailId && (
+        <>
+          {/* Backdrop */}
+          <div
+            onClick={() => setDetailId(null)}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100,
+            }}
+          />
+          {/* Drawer */}
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: 520,
+            background: '#13172A', zIndex: 101, overflowY: 'auto',
+            borderLeft: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '-8px 0 32px rgba(0,0,0,.4)',
+          }}>
+            {detailLoading ? (
+              <div style={{ padding: 40, textAlign: 'center', color: '#64748B' }}>Loading…</div>
+            ) : detailLead ? (
+              <div style={{ padding: 28 }}>
+                {/* Close */}
+                <button
+                  onClick={() => setDetailId(null)}
+                  style={{
+                    position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.06)',
+                    border: 'none', color: '#94A3B8', fontSize: 18, width: 32, height: 32,
+                    borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  ✕
+                </button>
+
+                {/* Avatar + Name */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
+                  <div style={{
+                    width: 56, height: 56, borderRadius: '50%', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700,
+                    background: 'rgba(79,110,247,0.15)', color: '#4F6EF7',
+                  }}>
+                    {initials(detailLead.name || detailLead.email)}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>
+                      {detailLead.name || 'Unknown'}
+                    </div>
+                    <div style={{ fontSize: 13, color: '#64748B' }}>{detailLead.email || '—'}</div>
+                  </div>
+                </div>
+
+                {/* Info Grid */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24,
+                }}>
+                  {[
+                    { label: 'Phone', value: detailLead.phone || '—' },
+                    { label: 'Device', value: detailLead.device || '—' },
+                    { label: 'Score', value: detailLead.score },
+                    { label: 'Watch Depth', value: detailLead.watch_depth_pct ? `${detailLead.watch_depth_pct}%` : '—' },
+                    { label: 'Source', value: detailLead.utm_source || detailLead.source || '—' },
+                    { label: 'Campaign', value: detailLead.utm_campaign || '—' },
+                    { label: 'IP', value: detailLead.ip_address || '—' },
+                    { label: 'Captured', value: formatDate(detailLead.created_at) },
+                  ].map(item => (
+                    <div key={item.label} style={{
+                      background: 'rgba(255,255,255,0.04)', borderRadius: 8, padding: '10px 14px',
+                    }}>
+                      <div style={{ fontSize: 11, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {item.label}
+                      </div>
+                      <div style={{ fontSize: 14, color: '#E2E8F0', fontWeight: 500, marginTop: 2 }}>
+                        {item.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Video Watched */}
+                {detailLead.videos && (
+                  <div style={{
+                    ...card, padding: 14, marginBottom: 20,
+                  }}>
+                    <div style={{ fontSize: 12, color: '#64748B', textTransform: 'uppercase', marginBottom: 8, fontWeight: 600, letterSpacing: '0.05em' }}>
+                      Video Watched
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      {detailLead.videos.thumbnail_url && (
+                        <img src={detailLead.videos.thumbnail_url} alt="" style={{
+                          width: 80, height: 45, borderRadius: 6, objectFit: 'cover',
+                        }} />
+                      )}
+                      <div>
+                        <div style={{ fontSize: 14, color: '#E2E8F0', fontWeight: 600 }}>
+                          {detailLead.videos.title}
+                        </div>
+                        {detailLead.watch_depth_pct !== null && (
+                          <div style={{ fontSize: 12, color: '#64748B', marginTop: 3 }}>
+                            Watched {detailLead.watch_depth_pct}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ fontSize: 12, color: '#64748B', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                    Status
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    {STATUS_OPTIONS.map(s => (
+                      <button key={s}
+                        onClick={() => handleStatusChange(detailLead.id, s, detailLead.status)}
+                        style={{
+                          padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                          cursor: 'pointer', border: `1px solid ${STATUS_COLORS[s]}44`,
+                          background: detailLead.status === s ? `${STATUS_COLORS[s]}33` : 'transparent',
+                          color: detailLead.status === s ? STATUS_COLORS[s] : '#64748B',
+                        }}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Survey Responses */}
+                {detailLead.responses && detailLead.responses.length > 0 && (
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ fontSize: 12, color: '#64748B', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                      Survey Responses
+                    </label>
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {detailLead.responses.map((r, i) => (
+                        <div key={i} style={{
+                          background: 'rgba(255,255,255,0.04)', borderRadius: 8, padding: '10px 14px',
+                        }}>
+                          <div style={{ fontSize: 12, color: '#94A3B8', fontWeight: 600 }}>
+                            {r.question || r.label || `Question ${i + 1}`}
+                          </div>
+                          <div style={{ fontSize: 13, color: '#E2E8F0', marginTop: 2 }}>
+                            {r.answer || r.value || '—'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tags */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, color: '#64748B', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                    Tags <span style={{ fontWeight: 400, textTransform: 'none' }}>(comma-separated)</span>
+                  </label>
+                  <input
+                    value={editTags}
+                    onChange={e => setEditTags(e.target.value)}
+                    placeholder="hot, demo-request, enterprise"
+                    style={{
+                      width: '100%', marginTop: 6, padding: '8px 12px', borderRadius: 8,
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                      color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Follow-up Date */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, color: '#64748B', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                    Follow-up Date
+                  </label>
+                  <input
+                    type="date"
+                    value={editFollowUp}
+                    onChange={e => setEditFollowUp(e.target.value)}
+                    style={{
+                      width: '100%', marginTop: 6, padding: '8px 12px', borderRadius: 8,
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                      color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Notes */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ fontSize: 12, color: '#64748B', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                    Notes
+                  </label>
+                  <textarea
+                    value={editNotes}
+                    onChange={e => setEditNotes(e.target.value)}
+                    rows={4}
+                    placeholder="Add internal notes about this lead…"
+                    style={{
+                      width: '100%', marginTop: 6, padding: '10px 12px', borderRadius: 8,
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                      color: '#fff', fontSize: 13, outline: 'none', resize: 'vertical',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Save Button */}
+                <button onClick={handleSaveDetail} style={btn()}>
+                  💾 Save Changes
+                </button>
+
+                {/* ── Timeline / Events ── */}
+                {detailLead.events && detailLead.events.length > 0 && (
+                  <div style={{ marginTop: 28 }}>
+                    <label style={{ fontSize: 12, color: '#64748B', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                      Activity Timeline
+                    </label>
+                    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {detailLead.events.map(ev => (
+                        <div key={ev.id} style={{
+                          display: 'flex', gap: 12, alignItems: 'flex-start',
+                          padding: '10px 14px', borderRadius: 8,
+                          background: 'rgba(255,255,255,0.03)',
+                        }}>
+                          <div style={{
+                            width: 8, height: 8, borderRadius: '50%', marginTop: 5, flexShrink: 0,
+                            background: ev.event_type === 'status_change' ? '#F5A623'
+                              : ev.event_type === 'gate_submit' ? '#1ED8A0' : '#4F6EF7',
+                          }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, color: '#E2E8F0', fontWeight: 500 }}>
+                              {ev.event_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                            </div>
+                            {ev.metadata && Object.keys(ev.metadata).length > 0 && (
+                              <div style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                                {ev.metadata.from && ev.metadata.to
+                                  ? `${ev.metadata.from} → ${ev.metadata.to}`
+                                  : JSON.stringify(ev.metadata)
+                                }
+                              </div>
+                            )}
+                            <div style={{ fontSize: 11, color: '#475569', marginTop: 3 }}>
+                              {formatDate(ev.created_at)}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ padding: 40, textAlign: 'center', color: '#64748B' }}>Lead not found</div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ─── IMPORT MODAL ───────────────────────────────────────────────── */}
+      {importModalOpen && (
+        <>
+          <div
+            onClick={() => setImportModalOpen(false)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200 }}
+          />
+          <div style={{
+            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            background: '#1A1F2E', borderRadius: 16, padding: 32, zIndex: 201,
+            width: 440, border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 16px 48px rgba(0,0,0,.5)',
+          }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700, color: '#fff' }}>
+              Import Leads from CSV
+            </h3>
+            <p style={{ fontSize: 13, color: '#64748B', margin: '0 0 20px' }}>
+              Upload a CSV file with at least an <strong style={{ color: '#94A3B8' }}>email</strong> column.
+              Supported columns: name, first_name, last_name, phone, status, tags, notes, score, source.
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleImport}
+              style={{
+                display: 'block', width: '100%', padding: '12px', borderRadius: 8,
+                background: 'rgba(255,255,255,0.06)', border: '1px dashed rgba(255,255,255,0.15)',
+                color: '#E2E8F0', fontSize: 13, cursor: 'pointer', boxSizing: 'border-box',
+              }}
+            />
+            <button
+              onClick={() => setImportModalOpen(false)}
+              style={{ ...btn('rgba(255,255,255,0.08)'), marginTop: 16, width: '100%' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
       )}
     </div>
   )

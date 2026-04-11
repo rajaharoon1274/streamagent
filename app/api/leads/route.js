@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, getWorkspace } from '@/lib/auth'
 
-const supabase = createClient(
+const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY,
 )
@@ -29,6 +30,98 @@ function isValidEmail(email = '') {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
 }
 
+/* ─── GET /api/leads ─────────────────────────────────────────────────────────
+   JWT-protected. List leads for the user's workspace with filters, pagination, sorting.
+   Query params:
+     video_id, status, search, date_from, date_to,
+     page (default 1), limit (default 25),
+     sort (default 'newest'), tag
+────────────────────────────────────────────────────────────────────────────── */
+export async function GET(req) {
+    try {
+        const auth = await requireAuth()
+        if (auth instanceof NextResponse) return auth
+        const { user, supabase } = auth
+
+        const workspace = await getWorkspace(supabase, user.id)
+        if (!workspace) {
+            return NextResponse.json({ error: 'No workspace found' }, { status: 404 })
+        }
+
+        const { searchParams } = new URL(req.url)
+        const video_id = searchParams.get('video_id')
+        const status = searchParams.get('status')
+        const search = searchParams.get('search')
+        const date_from = searchParams.get('date_from')
+        const date_to = searchParams.get('date_to')
+        const tag = searchParams.get('tag')
+        const sort = searchParams.get('sort') || 'newest'
+        const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
+        const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25', 10)))
+
+        const from = (page - 1) * limit
+        const to = from + limit - 1
+
+        // Build query — select leads with joined video title
+        let query = supabaseAdmin
+            .from('leads')
+            .select(`
+        *,
+        videos:video_id ( id, title, thumbnail_url )
+      `, { count: 'exact' })
+            .eq('workspace_id', workspace.id)
+
+        // ── Filters ──
+        if (video_id) query = query.eq('video_id', video_id)
+        if (status && status !== 'all') query = query.eq('status', status)
+        if (tag) query = query.contains('tags', [tag])
+        if (date_from) query = query.gte('created_at', date_from)
+        if (date_to) query = query.lte('created_at', date_to + 'T23:59:59.999Z')
+
+        // ── Search (name, email, phone) ──
+        if (search) {
+            const s = `%${search}%`
+            query = query.or(`email.ilike.${s},name.ilike.${s},phone.ilike.${s}`)
+        }
+
+        // ── Sorting ──
+        switch (sort) {
+            case 'oldest': query = query.order('created_at', { ascending: true }); break
+            case 'score_high': query = query.order('score', { ascending: false }); break
+            case 'score_low': query = query.order('score', { ascending: true }); break
+            case 'name_az': query = query.order('name', { ascending: true }); break
+            case 'name_za': query = query.order('name', { ascending: false }); break
+            case 'newest':
+            default: query = query.order('created_at', { ascending: false }); break
+        }
+
+        // ── Pagination ──
+        query = query.range(from, to)
+
+        const { data, error, count } = await query
+
+        if (error) {
+            console.error('[leads GET] query error:', error)
+            return NextResponse.json({ error: 'Failed to fetch leads' }, { status: 500 })
+        }
+
+        return NextResponse.json({
+            leads: data || [],
+            total: count || 0,
+            page,
+            limit,
+            totalPages: Math.ceil((count || 0) / limit),
+        })
+    } catch (err) {
+        console.error('[leads GET] unexpected error:', err)
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    }
+}
+
+/* ─── POST /api/leads ────────────────────────────────────────────────────────
+   Public endpoint — called from the player when a viewer submits a gate.
+   (Keeping your existing logic unchanged.)
+────────────────────────────────────────────────────────────────────────────── */
 export async function POST(req) {
     try {
         const body = await req.json()
@@ -43,10 +136,9 @@ export async function POST(req) {
             visitor_fingerprint,
             source_url,
             lid,
-            responses,          // ✅ FIX 1 — destructure responses
+            responses,
         } = body
 
-        // ── Validate required fields ──────────────────────────────────────��───
         if (!workspace_id || !video_id) {
             return NextResponse.json(
                 { error: 'workspace_id and video_id are required' },
@@ -54,7 +146,6 @@ export async function POST(req) {
             )
         }
 
-        // ✅ FIX 2 — allow survey internal emails to bypass validation
         const isSurveyEmail = email?.endsWith('@noemail.internal')
         if (!isSurveyEmail && (!email || !isValidEmail(email))) {
             return NextResponse.json(
@@ -63,9 +154,9 @@ export async function POST(req) {
             )
         }
 
-        // ── lid: merge into existing lead ─────────────────────────────────────
+        // lid: merge into existing lead
         if (lid) {
-            const { data: existing } = await supabase
+            const { data: existing } = await supabaseAdmin
                 .from('leads')
                 .select('id, responses')
                 .eq('id', lid)
@@ -77,7 +168,7 @@ export async function POST(req) {
                     ...(existing.responses || []),
                     ...(responses || []),
                 ]
-                await supabase
+                await supabaseAdmin
                     .from('leads')
                     .update({
                         updated_at: new Date().toISOString(),
@@ -89,22 +180,17 @@ export async function POST(req) {
             }
         }
 
-        // ── Get client metadata ───────────────────────────────────────────────
         const ua = req.headers.get('user-agent') || ''
         const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || req.headers.get('x-real-ip')
             || null
 
-        // ── Parse name ────────────────────────────────────────────────────────
         const nameParts = (name || '').trim().split(/\s+/)
         const first_name = nameParts[0] || null
         const last_name = nameParts.slice(1).join(' ') || null
-
-        // ── UTMs ──────────────────────────────────────────────────────────────
         const utms = extractUTMs(source_url)
 
-        // ── Insert lead ───────────────────────────────────────────────────────
-        const { data: lead, error } = await supabase
+        const { data: lead, error } = await supabaseAdmin
             .from('leads')
             .insert({
                 workspace_id,
@@ -127,8 +213,7 @@ export async function POST(req) {
                 visitor_fingerprint: visitor_fingerprint || null,
                 ip_address: ip,
                 tags: [],
-                responses: responses || [],   // ✅ FIX 3 — use passed responses
-                custom_fields: {},
+                responses: responses || [],
                 rewatched: false,
                 rewatch_count: 0,
                 lead_magnet_sent: false,
