@@ -53,8 +53,18 @@ function getEdges(nodes) {
 }
 
 // ─── Shared button styles ─────────────────────────────────────────────────────
-const tbBtn = { padding: '5px 10px', borderRadius: 7, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0, fontFamily: 'inherit' }
-const iconBtn = { width: 22, height: 22, borderRadius: 5, background: 'var(--s2)', border: '1px solid var(--b2)', color: 'var(--t3)', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontFamily: 'inherit' }
+const tbBtn = {
+  padding: '5px 10px', borderRadius: 7, background: 'var(--s3)',
+  border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 11,
+  fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+  flexShrink: 0, fontFamily: 'inherit',
+}
+const iconBtn = {
+  width: 22, height: 22, borderRadius: 5, background: 'var(--s2)',
+  border: '1px solid var(--b2)', color: 'var(--t3)', fontSize: 11,
+  cursor: 'pointer', display: 'flex', alignItems: 'center',
+  justifyContent: 'center', flexShrink: 0, fontFamily: 'inherit',
+}
 
 // ─── Mobile CSS ───────────────────────────────────────────────────────────────
 const MOBILE_CSS = `
@@ -114,14 +124,14 @@ export default function Builder() {
       setNodesBooted(true)
       setSavedHash(JSON.stringify(mapped))
 
-      // ── RECONSTRUCT route groups from DB data ──────────────────────
-      // Each root node stores { route_group_name, ... } in landing_page JSONB
+      // ── RECONSTRUCT route groups from DB data ──────────────────────────────
       const groupMap = {}
       mapped.forEach(n => {
         const groupId = n.routeGroup || 'default'
         if (!groupMap[groupId]) {
-          // Try to get the human name from the root node's landing_page
-          const rootOfGroup = mapped.find(x => (x.routeGroup || 'default') === groupId && x.isRoot)
+          const rootOfGroup = mapped.find(
+            x => (x.routeGroup || 'default') === groupId && x.isRoot
+          )
           const savedName = rootOfGroup?.rawLandingPage?.route_group_name
           groupMap[groupId] = savedName || (groupId === 'default' ? 'My Route' : groupId)
         }
@@ -135,7 +145,7 @@ export default function Builder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routesData])
 
-  // ── Named route groups ────────────────────────────────────────────────────
+  // ── Named route groups ──────────────────────────��─────────────────────────
   const [routeGroups, setRouteGroups] = useState([{ id: 'default', name: 'My Route' }])
   const [activeGroupId, setActiveGroupId] = useState('default')
 
@@ -177,11 +187,12 @@ export default function Builder() {
   scaleRef.current = scale
   allNodesRef.current = allNodes
 
-  // ── Mobile CSS ────────────────────────────────────────────────────────────
+  // ── Mobile CSS injection ──────────────────────────────────────────────────
   useEffect(() => {
     if (document.getElementById('builder-mobile-css')) return
     const s = document.createElement('style')
-    s.id = 'builder-mobile-css'; s.textContent = MOBILE_CSS
+    s.id = 'builder-mobile-css'
+    s.textContent = MOBILE_CSS
     document.head.appendChild(s)
   }, [])
 
@@ -194,22 +205,20 @@ export default function Builder() {
   const activeGroup = routeGroups.find(g => g.id === activeGroupId)
 
   // ── Share URL derivation ──────────────────────────────────────────────────
-  // rootNodeForShare = the ENTRY node (isRoot=true) or first node on canvas
   const rootNodeForShare = canvasNodes.find(n => n.isRoot) || canvasNodes[0] || null
-  // shareVideoId — the actual video id to send to /watch/[id]
-  // Only set when node is saved to DB (not a temp_ id)
-  const shareVideoId = (
+  const shareVideoId =
     rootNodeForShare?.videoId &&
-    rootNodeForShare?.id &&
-    !rootNodeForShare.id.startsWith('tmp_')
-  ) ? rootNodeForShare.videoId : null
-  // slug — the node DB id, used as fallback for /r/[slug] embeds
-  const slug = (rootNodeForShare?.id && !rootNodeForShare.id.startsWith('tmp_'))
-    ? rootNodeForShare.id
-    : null
+      rootNodeForShare?.id &&
+      !rootNodeForShare.id.startsWith('tmp_')
+      ? rootNodeForShare.videoId
+      : null
+  const slug =
+    rootNodeForShare?.id && !rootNodeForShare.id.startsWith('tmp_')
+      ? rootNodeForShare.id
+      : null
 
-  const filteredVids = (libExpanded ? VIDEOS : VIDEOS.slice(0, 6)).filter(v =>
-    !search || v.title.toLowerCase().includes(search.toLowerCase())
+  const filteredVids = (libExpanded ? VIDEOS : VIDEOS.slice(0, 6)).filter(
+    v => !search || v.title.toLowerCase().includes(search.toLowerCase())
   )
 
   // ── Sidebar route list ────────────────────────────────────────────────────
@@ -248,7 +257,9 @@ export default function Builder() {
           const j = await res.json().catch(() => ({}))
           console.error('[Builder PATCH]', j.error)
         }
-      } catch (e) { console.error('[Builder PATCH]', e) }
+      } catch (e) {
+        console.error('[Builder PATCH]', e)
+      }
     }, 800)
   }
 
@@ -262,34 +273,59 @@ export default function Builder() {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ELEMENTS — save to DB + load from DB
+  // ELEMENTS — load from DB scoped by route node (route_id)
   // ══════════════════════════════════════════════════════════════════════════
 
-  async function saveElementsToDB(nodeId, els) {
-    const node = allNodesRef.current.find(n => n.id === nodeId)
-    if (!node?.videoId) return
-    try {
-      const res = await fetch('/api/elements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_id: node.videoId, elements: els }),
-      })
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}))
-        console.error('[Builder] Save elements failed:', j.error)
+  async function openEditor(id) {
+    if (editingNodeId === id) { setEditingNodeId(null); return }
+    setEditingNodeId(id)
+    setSelNodeId(null)
+    setSidebarOpen(false)
+
+    if (!routeEls[id]) {
+      const node = allNodesRef.current.find(n => n.id === id)
+      if (node?.videoId) {
+        try {
+          // ✅ Scoped by both video_id AND route_id so each node has independent elements
+          const res = await fetch(
+            `/api/elements?video_id=${node.videoId}&route_id=${id}`
+          )
+          if (res.ok) {
+            const data = await res.json()
+            const arr = Array.isArray(data) ? data : (data.elements || [])
+            const mapped = arr.map(el => ({
+              id: el.id,
+              type: el.type,
+              props: el.props || {},
+              xPct: el.x ?? 10,
+              yPct: el.y ?? 10,
+              wPct: el.w ?? 40,
+              hPct: el.h ?? 25,
+              timing: el.timing || {
+                mode: 'at-time', in: 0, duration: 5,
+                animIn: 'fadeIn', animOut: 'fadeOut',
+                animSpeed: '0.4', trigger: 'time',
+              },
+              gate: el.gate || { enabled: false },
+              conditions: el.conditions || [],
+              opacity: el.opacity ?? 1,
+              zIndex: el.z_index ?? 1,
+            }))
+            setRouteEls(prev => ({ ...prev, [id]: mapped }))
+          }
+        } catch (e) {
+          console.error('[Builder] Load elements error:', e)
+          setRouteEls(prev => ({ ...prev, [id]: [] }))
+        }
+      } else {
+        setRouteEls(prev => ({ ...prev, [id]: [] }))
       }
-    } catch (e) {
-      console.error('[Builder] Save elements error:', e)
     }
   }
-  
+
   function handleElChange(nodeId, newEls) {
     setRouteEls(prev => ({ ...prev, [nodeId]: newEls }))
     scheduleAutoSave()
-    clearTimeout(elSaveTimers.current[nodeId])
-    elSaveTimers.current[nodeId] = setTimeout(() => {
-      saveElementsToDB(nodeId, newEls)
-    }, 1500)
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -310,7 +346,8 @@ export default function Builder() {
   // ══════════════════════════════════════════════════════════════════════════
 
   useEffect(() => {
-    const el = canvasRef.current; if (!el) return
+    const el = canvasRef.current
+    if (!el) return
     const handler = e => {
       e.preventDefault()
       const d = e.deltaY > 0 ? -0.08 : 0.08
@@ -321,8 +358,10 @@ export default function Builder() {
         x: cx - (cx - vpRef.current.x) * (ns / scaleRef.current),
         y: cy - (cy - vpRef.current.y) * (ns / scaleRef.current),
       }
-      scaleRef.current = ns; vpRef.current = nv
-      setScale(ns); setVp({ ...nv })
+      scaleRef.current = ns
+      vpRef.current = nv
+      setScale(ns)
+      setVp({ ...nv })
     }
     el.addEventListener('wheel', handler, { passive: false })
     return () => el.removeEventListener('wheel', handler)
@@ -334,12 +373,23 @@ export default function Builder() {
 
   function onCanvasMouseDown(e) {
     const t = e.target
-    const isBg = t === canvasRef.current || ['svg', 'path', 'polygon', 'text', 'g'].includes(t.tagName)
+    const isBg =
+      t === canvasRef.current ||
+      ['svg', 'path', 'polygon', 'text', 'g'].includes(t.tagName)
     if (!isBg) return
-    const sx = e.clientX - vpRef.current.x, sy = e.clientY - vpRef.current.y
-    const mv = me => { const nv = { x: me.clientX - sx, y: me.clientY - sy }; vpRef.current = nv; setVp({ ...nv }) }
-    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up) }
-    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up)
+    const sx = e.clientX - vpRef.current.x
+    const sy = e.clientY - vpRef.current.y
+    const mv = me => {
+      const nv = { x: me.clientX - sx, y: me.clientY - sy }
+      vpRef.current = nv
+      setVp({ ...nv })
+    }
+    const up = () => {
+      document.removeEventListener('mousemove', mv)
+      document.removeEventListener('mouseup', up)
+    }
+    document.addEventListener('mousemove', mv)
+    document.addEventListener('mouseup', up)
   }
 
   function onCanvasTouchStart(e) {
@@ -347,14 +397,19 @@ export default function Builder() {
     const t = e.target
     if (t !== canvasRef.current && t.tagName !== 'svg') return
     const tc = e.touches[0]
-    const sx = tc.clientX - vpRef.current.x, sy = tc.clientY - vpRef.current.y
+    const sx = tc.clientX - vpRef.current.x
+    const sy = tc.clientY - vpRef.current.y
     const mv = me => {
       if (me.touches.length !== 1) return
       const tt = me.touches[0]
       const nv = { x: tt.clientX - sx, y: tt.clientY - sy }
-      vpRef.current = nv; setVp({ ...nv })
+      vpRef.current = nv
+      setVp({ ...nv })
     }
-    const up = () => { document.removeEventListener('touchmove', mv); document.removeEventListener('touchend', up) }
+    const up = () => {
+      document.removeEventListener('touchmove', mv)
+      document.removeEventListener('touchend', up)
+    }
     document.addEventListener('touchmove', mv, { passive: false })
     document.addEventListener('touchend', up)
   }
@@ -367,7 +422,8 @@ export default function Builder() {
     if (e.button !== 0) return
     e.stopPropagation()
     setSelNodeId(id)
-    const node = allNodesRef.current.find(r => r.id === id); if (!node) return
+    const node = allNodesRef.current.find(r => r.id === id)
+    if (!node) return
     const sx = e.clientX - node.x * scaleRef.current
     const sy = e.clientY - node.y * scaleRef.current
     const stX = e.clientX, stY = e.clientY
@@ -378,17 +434,22 @@ export default function Builder() {
       node.x = (me.clientX - sx) / scaleRef.current
       node.y = (me.clientY - sy) / scaleRef.current
       const el = document.getElementById('bn-' + id)
-      if (el) { el.style.left = node.x + 'px'; el.style.top = node.y + 'px' }
+      if (el) {
+        el.style.left = node.x + 'px'
+        el.style.top = node.y + 'px'
+      }
     }
     const up = () => {
-      document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up)
+      document.removeEventListener('mousemove', mv)
+      document.removeEventListener('mouseup', up)
       if (moved) {
         setAllNodes([...allNodesRef.current])
         scheduleAutoSave()
         apiPatch(id, { x: Math.round(node.x), y: Math.round(node.y) })
       }
     }
-    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up)
+    document.addEventListener('mousemove', mv)
+    document.addEventListener('mouseup', up)
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -397,8 +458,10 @@ export default function Builder() {
 
   function onPaletteMouseDown(e, videoId) {
     if (e.button !== 0) return
-    e.preventDefault(); e.stopPropagation()
-    const v = VIDEOS.find(x => x.id === videoId); if (!v) return
+    e.preventDefault()
+    e.stopPropagation()
+    const v = VIDEOS.find(x => x.id === videoId)
+    if (!v) return
     const ghost = document.createElement('div')
     ghost.style.cssText = `position:fixed;pointer-events:none;z-index:99999;border-radius:10px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.5);width:160px;opacity:.92;left:${e.clientX - 80}px;top:${e.clientY - 30}px`
     ghost.innerHTML = `<div style="height:44px;background:${v.color};display:flex;align-items:center;justify-content:center"><div style="width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.85);display:flex;align-items:center;justify-content:center;font-size:9px">▶</div></div><div style="background:#0C0F1C;padding:7px 9px;border:1px solid ${v.color}44;border-top:none;border-radius:0 0 10px 10px"><div style="font-size:11px;font-weight:700;color:#EEF2FF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.title}</div><div style="font-size:9px;color:#7B87A0;margin-top:2px">${v.dur}</div></div>`
@@ -406,10 +469,13 @@ export default function Builder() {
     const canvas = canvasRef.current
     if (canvas) canvas.style.outline = `2px dashed ${v.color}88`
     const mv = me => {
-      ghost.style.left = (me.clientX - 80) + 'px'; ghost.style.top = (me.clientY - 30) + 'px'
+      ghost.style.left = me.clientX - 80 + 'px'
+      ghost.style.top = me.clientY - 30 + 'px'
       if (canvas) {
         const rc = canvas.getBoundingClientRect()
-        const over = me.clientX >= rc.left && me.clientX <= rc.right && me.clientY >= rc.top && me.clientY <= rc.bottom
+        const over =
+          me.clientX >= rc.left && me.clientX <= rc.right &&
+          me.clientY >= rc.top && me.clientY <= rc.bottom
         canvas.style.outline = over ? `2px solid ${v.color}` : `2px dashed ${v.color}88`
         ghost.style.opacity = over ? '1' : '0.75'
       }
@@ -417,17 +483,21 @@ export default function Builder() {
     const up = me => {
       ghost.parentNode?.removeChild(ghost)
       if (canvas) canvas.style.outline = ''
-      document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up)
+      document.removeEventListener('mousemove', mv)
+      document.removeEventListener('mouseup', up)
       if (!canvas) return
       const rc = canvas.getBoundingClientRect()
-      const on = me.clientX >= rc.left && me.clientX <= rc.right && me.clientY >= rc.top && me.clientY <= rc.bottom
+      const on =
+        me.clientX >= rc.left && me.clientX <= rc.right &&
+        me.clientY >= rc.top && me.clientY <= rc.bottom
       if (on) {
         const x = (me.clientX - rc.left - vpRef.current.x) / scaleRef.current - NODE_W / 2
         const y = (me.clientY - rc.top - vpRef.current.y) / scaleRef.current - NODE_H / 2
         addNode(videoId, Math.max(0, x), Math.max(0, y))
       }
     }
-    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up)
+    document.addEventListener('mousemove', mv)
+    document.addEventListener('mouseup', up)
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -436,8 +506,11 @@ export default function Builder() {
 
   async function addNode(videoId, x, y) {
     if (!workspaceId) return
-    const v = VIDEOS.find(xv => xv.id === videoId); if (!v) return
-    const gNodes = allNodesRef.current.filter(n => (n.routeGroup || 'default') === activeGroupId)
+    const v = VIDEOS.find(xv => xv.id === videoId)
+    if (!v) return
+    const gNodes = allNodesRef.current.filter(
+      n => (n.routeGroup || 'default') === activeGroupId
+    )
     const isFirst = gNodes.length === 0
     const nx = x ?? 100 + gNodes.length * 40
     const ny = y ?? 100 + gNodes.length * 30
@@ -449,7 +522,8 @@ export default function Builder() {
       isRoot: isFirst, choicePoints: [], routeGroup: activeGroupId, _saving: true,
     }
     const withTemp = [...allNodesRef.current, tempNode]
-    allNodesRef.current = withTemp; setAllNodes(withTemp)
+    allNodesRef.current = withTemp
+    setAllNodes(withTemp)
 
     try {
       const saved = await apiCreate({
@@ -469,14 +543,16 @@ export default function Builder() {
 
       const realNode = { ...dbToNode(saved), routeGroup: activeGroupId }
       const withReal = allNodesRef.current.map(n => n.id === tempId ? realNode : n)
-      allNodesRef.current = withReal; setAllNodes(withReal)
+      allNodesRef.current = withReal
+      setAllNodes(withReal)
       setSelNodeId(realNode.id)
       scheduleAutoSave()
       mutateRoutes()
     } catch (err) {
       console.error('[addNode]', err)
       const without = allNodesRef.current.filter(n => n.id !== tempId)
-      allNodesRef.current = without; setAllNodes(without)
+      allNodesRef.current = without
+      setAllNodes(without)
     }
   }
 
@@ -487,10 +563,14 @@ export default function Builder() {
       .map(r => ({
         ...r,
         choicePoints: (r.choicePoints || [])
-          .map(cp => ({ ...cp, choices: (cp.choices || []).filter(ch => ch.targetId !== id) }))
-          .filter(cp => (cp.choices || []).length > 0)
+          .map(cp => ({
+            ...cp,
+            choices: (cp.choices || []).filter(ch => ch.targetId !== id),
+          }))
+          .filter(cp => (cp.choices || []).length > 0),
       }))
-    allNodesRef.current = nr; setAllNodes(nr)
+    allNodesRef.current = nr
+    setAllNodes(nr)
     if (selNodeId === id) setSelNodeId(null)
     if (editingNodeId === id) setEditingNodeId(null)
     scheduleAutoSave()
@@ -505,7 +585,8 @@ export default function Builder() {
       mutateRoutes()
     } catch (err) {
       console.error('[removeNode]', err)
-      allNodesRef.current = prev; setAllNodes(prev)
+      allNodesRef.current = prev
+      setAllNodes(prev)
     }
   }
 
@@ -529,7 +610,8 @@ export default function Builder() {
   }, [])
 
   function duplicateNode(id) {
-    const n = allNodesRef.current.find(r => r.id === id); if (!n) return
+    const n = allNodesRef.current.find(r => r.id === id)
+    if (!n) return
     addNode(n.videoId, n.x + 30, n.y + 30)
   }
 
@@ -537,21 +619,39 @@ export default function Builder() {
     const f = allNodesRef.current.find(r => r.id === fromId)
     const t = allNodesRef.current.find(r => r.id === toId)
     if (!f || !t) return
-    if ((f.choicePoints || []).some(cp => (cp.choices || []).some(ch => ch.targetId === toId))) return
+    if ((f.choicePoints || []).some(cp =>
+      (cp.choices || []).some(ch => ch.targetId === toId)
+    )) return
     updateNode(fromId, {
-      choicePoints: [...(f.choicePoints || []), {
-        id: `cp_${Date.now()}`, triggerAt: 60, question: 'What would you like to do next?', subtitle: 'Choose your path',
-        choices: [{ id: `ch_${Date.now()}`, label: t.title, icon: '▶', color: t.color || '#4F6EF7', targetId: toId }]
-      }]
+      choicePoints: [
+        ...(f.choicePoints || []),
+        {
+          id: `cp_${Date.now()}`,
+          triggerAt: 60,
+          question: 'What would you like to do next?',
+          subtitle: 'Choose your path',
+          choices: [{
+            id: `ch_${Date.now()}`,
+            label: t.title,
+            icon: '▶',
+            color: t.color || '#4F6EF7',
+            targetId: toId,
+          }],
+        },
+      ],
     })
   }
 
   function disconnectNodes(fromId, toId) {
-    const f = allNodesRef.current.find(r => r.id === fromId); if (!f) return
+    const f = allNodesRef.current.find(r => r.id === fromId)
+    if (!f) return
     updateNode(fromId, {
-      choicePoints: (f.choicePoints || []).map(cp => ({
-        ...cp, choices: (cp.choices || []).filter(ch => ch.targetId !== toId)
-      })).filter(cp => (cp.choices || []).length > 0)
+      choicePoints: (f.choicePoints || [])
+        .map(cp => ({
+          ...cp,
+          choices: (cp.choices || []).filter(ch => ch.targetId !== toId),
+        }))
+        .filter(cp => (cp.choices || []).length > 0),
     })
   }
 
@@ -563,39 +663,65 @@ export default function Builder() {
     const es = getEdges(canvasNodes)
     const root = canvasNodes.find(r => r.isRoot) || canvasNodes[0]
     if (!root) return
-    const levels = { [root.id]: 0 }, queue = [root.id], visited = { [root.id]: true }
+    const levels = { [root.id]: 0 }
+    const queue = [root.id]
+    const visited = { [root.id]: true }
     while (queue.length) {
       const cur = queue.shift()
       es.filter(e => e.from.id === cur).forEach(e => {
-        if (!visited[e.to.id]) { visited[e.to.id] = true; levels[e.to.id] = (levels[cur] || 0) + 1; queue.push(e.to.id) }
+        if (!visited[e.to.id]) {
+          visited[e.to.id] = true
+          levels[e.to.id] = (levels[cur] || 0) + 1
+          queue.push(e.to.id)
+        }
       })
     }
     canvasNodes.forEach(r => { if (levels[r.id] === undefined) levels[r.id] = 0 })
     const byLv = {}
-    canvasNodes.forEach(r => { const lv = levels[r.id] || 0; if (!byLv[lv]) byLv[lv] = []; byLv[lv].push(r) })
-    const nr = allNodesRef.current.map(r => ({ ...r }))
-    Object.keys(byLv).sort((a, b) => +a - +b).forEach(lv => {
-      let x = 80; byLv[lv].forEach(n => { const nd = nr.find(r => r.id === n.id); if (nd) { nd.x = x; nd.y = 60 + (+lv) * 220 }; x += 290 })
+    canvasNodes.forEach(r => {
+      const lv = levels[r.id] || 0
+      if (!byLv[lv]) byLv[lv] = []
+      byLv[lv].push(r)
     })
-    allNodesRef.current = nr; setAllNodes([...nr]); setVp({ x: 0, y: 0 }); setScale(0.9)
-    nr.filter(n => (n.routeGroup || 'default') === activeGroupId)
+    const nr = allNodesRef.current.map(r => ({ ...r }))
+    Object.keys(byLv)
+      .sort((a, b) => +a - +b)
+      .forEach(lv => {
+        let x = 80
+        byLv[lv].forEach(n => {
+          const nd = nr.find(r => r.id === n.id)
+          if (nd) { nd.x = x; nd.y = 60 + +lv * 220 }
+          x += 290
+        })
+      })
+    allNodesRef.current = nr
+    setAllNodes([...nr])
+    setVp({ x: 0, y: 0 })
+    setScale(0.9)
+    nr
+      .filter(n => (n.routeGroup || 'default') === activeGroupId)
       .forEach(n => apiPatch(n.id, { x: Math.round(n.x), y: Math.round(n.y) }))
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // FIT SCREEN
-  // ═══════════════════════════════════════════════════════════════════════���══
+  // ══════════════════════════════════════════════════════════════════════════
 
   function fitScreen() {
     if (!canvasNodes.length) return
-    const xs = canvasNodes.map(r => r.x), ys = canvasNodes.map(r => r.y)
+    const xs = canvasNodes.map(r => r.x)
+    const ys = canvasNodes.map(r => r.y)
     const minX = Math.min(...xs) - 40, minY = Math.min(...ys) - 40
     const maxX = Math.max(...xs) + NODE_W + 40, maxY = Math.max(...ys) + NODE_H + 40
     const canvas = canvasRef.current
-    const cw = canvas ? canvas.clientWidth : 800, ch = canvas ? canvas.clientHeight : 500
+    const cw = canvas ? canvas.clientWidth : 800
+    const ch = canvas ? canvas.clientHeight : 500
     const sc = +Math.min(cw / (maxX - minX), ch / (maxY - minY), 1.4).toFixed(2)
     const nv = { x: -minX * sc + 20, y: -minY * sc + 20 }
-    scaleRef.current = sc; vpRef.current = nv; setScale(sc); setVp(nv)
+    scaleRef.current = sc
+    vpRef.current = nv
+    setScale(sc)
+    setVp(nv)
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -620,8 +746,11 @@ export default function Builder() {
 
   function doLoad(groupId) {
     setActiveGroupId(groupId)
-    setSelNodeId(null); setEditingNodeId(null)
-    setVp({ x: 60, y: 40 }); setScale(0.9); setSidebarOpen(false)
+    setSelNodeId(null)
+    setEditingNodeId(null)
+    setVp({ x: 60, y: 40 })
+    setScale(0.9)
+    setSidebarOpen(false)
   }
 
   function confirmNewRoute() {
@@ -629,87 +758,63 @@ export default function Builder() {
     const newId = `grp_${newRouteName.trim().toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`
     setRouteGroups(prev => [...prev, { id: newId, name: newRouteName.trim() }])
     setActiveGroupId(newId)
-    setSelNodeId(null); setEditingNodeId(null)
-    setVp({ x: 60, y: 40 }); setScale(0.9)
-    setNewRouteName(''); setNewRouteModal(false)
+    setSelNodeId(null)
+    setEditingNodeId(null)
+    setVp({ x: 60, y: 40 })
+    setScale(0.9)
+    setNewRouteName('')
+    setNewRouteModal(false)
   }
 
   function deleteRouteGroup(groupId) {
     allNodesRef.current
       .filter(n => (n.routeGroup || 'default') === groupId)
       .forEach(n => apiDelete(n.id).catch(() => { }))
-    const remaining = allNodesRef.current.filter(n => (n.routeGroup || 'default') !== groupId)
-    allNodesRef.current = remaining; setAllNodes(remaining)
+    const remaining = allNodesRef.current.filter(
+      n => (n.routeGroup || 'default') !== groupId
+    )
+    allNodesRef.current = remaining
+    setAllNodes(remaining)
     setRouteGroups(prev => prev.filter(g => g.id !== groupId))
     if (activeGroupId === groupId) {
       const first = routeGroups.find(g => g.id !== groupId)
       setActiveGroupId(first?.id || 'default')
     }
-    setSelNodeId(null); setEditingNodeId(null)
+    setSelNodeId(null)
+    setEditingNodeId(null)
     mutateRoutes()
   }
 
   function dupRouteGroup(groupId) {
-    const srcNodes = allNodesRef.current.filter(n => (n.routeGroup || 'default') === groupId)
+    const srcNodes = allNodesRef.current.filter(
+      n => (n.routeGroup || 'default') === groupId
+    )
     const newGroupId = `grp_${Date.now()}`
     const srcGroup = routeGroups.find(g => g.id === groupId)
-    setRouteGroups(prev => [...prev, { id: newGroupId, name: (srcGroup?.name || 'Route') + ' (copy)' }])
+    setRouteGroups(prev => [
+      ...prev,
+      { id: newGroupId, name: (srcGroup?.name || 'Route') + ' (copy)' },
+    ])
     srcNodes.forEach(n => addNodeDirect(n.videoId, n.x + 20, n.y + 20, newGroupId))
   }
 
   async function addNodeDirect(videoId, x, y, groupId) {
     if (!workspaceId) return
-    const v = VIDEOS.find(xv => xv.id === videoId); if (!v) return
+    const v = VIDEOS.find(xv => xv.id === videoId)
+    if (!v) return
     try {
       const saved = await apiCreate({
         video_id: v.id, title: v.title, color: v.color,
         x: Math.round(x), y: Math.round(y), is_root: false,
         duration: v.duration_seconds || 240,
+        route_group: groupId,
       })
       const realNode = { ...dbToNode(saved), routeGroup: groupId }
       const nr = [...allNodesRef.current, realNode]
-      allNodesRef.current = nr; setAllNodes(nr)
-    } catch (err) { console.error('[addNodeDirect]', err) }
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // ELEMENTS EDITOR — open + load from DB
-  // ══════════════════════════════════════════════════════════════════════════
-
-  async function openEditor(id) {
-    if (editingNodeId === id) { setEditingNodeId(null); return }
-    setEditingNodeId(id); setSelNodeId(null); setSidebarOpen(false)
-
-    if (!routeEls[id]) {
-      const node = allNodesRef.current.find(n => n.id === id)
-      if (node?.videoId) {
-        try {
-          const res = await fetch(`/api/elements?video_id=${node.videoId}`)
-          if (res.ok) {
-            const data = await res.json()
-            const mapped = (Array.isArray(data) ? data : []).map(el => ({
-              id: el.id,
-              type: el.type,
-              props: el.props || {},
-              xPct: el.x ?? 10,
-              yPct: el.y ?? 10,
-              wPct: el.w ?? 40,
-              hPct: el.h ?? 25,
-              timing: el.timing || { mode: 'at-time', in: 0, duration: 5, animIn: 'fadeIn', animOut: 'fadeOut', animSpeed: '0.4', trigger: 'time' },
-              gate: el.gate || { enabled: false },
-              conditions: el.conditions || [],
-              opacity: el.opacity ?? 1,
-              zIndex: el.z_index ?? 1,
-            }))
-            setRouteEls(prev => ({ ...prev, [id]: mapped }))
-          }
-        } catch (e) {
-          console.error('[Builder] Load elements error:', e)
-          setRouteEls(prev => ({ ...prev, [id]: [] }))
-        }
-      } else {
-        setRouteEls(prev => ({ ...prev, [id]: [] }))
-      }
+      allNodesRef.current = nr
+      setAllNodes(nr)
+    } catch (err) {
+      console.error('[addNodeDirect]', err)
     }
   }
 
@@ -727,7 +832,10 @@ export default function Builder() {
   }
 
   // ── Save button display ───────────────────────────────────────────────────
-  const saveLabel = saveFlash === 'saved' ? '✓ Saved' : saveFlash === 'auto' ? '✓ Auto-saved' : hasUnsaved ? '● Save' : '✓ Saved'
+  const saveLabel =
+    saveFlash === 'saved' ? '✓ Saved' :
+      saveFlash === 'auto' ? '✓ Auto-saved' :
+        hasUnsaved ? '● Save' : '✓ Saved'
   const saveBg = hasUnsaved && !saveFlash ? 'var(--acc)' : 'var(--s3)'
   const saveColor = hasUnsaved && !saveFlash ? '#fff' : saveFlash ? 'var(--grn)' : 'var(--t2)'
   const saveBorder = hasUnsaved && !saveFlash ? 'var(--acc)' : saveFlash ? 'var(--grn)' : 'var(--b2)'
@@ -750,7 +858,7 @@ export default function Builder() {
         <button onClick={fitScreen} style={tbBtn}>⤢ <span className="tb-label">Fit</span></button>
         <button onClick={autoLayout} style={tbBtn}>⊞ <span className="tb-label">Auto-Layout</span></button>
         <button onClick={() => openPreview('desktop')} style={{ ...tbBtn, background: 'var(--s3)' }}>▶ <span className="tb-label">Preview</span></button>
-        <button onClick={() => openPreview('mobile')} style={{ ...tbBtn }}>📱</button>
+        <button onClick={() => openPreview('mobile')} style={tbBtn}>📱</button>
 
         <div style={{ flex: 1 }} />
 
@@ -769,14 +877,14 @@ export default function Builder() {
         </button>
 
         {canvasNodes.length > 0 && (
-          <button onClick={() => { if (window.confirm('Delete all nodes in this route?')) deleteRouteGroup(activeGroupId) }}
+          <button
+            onClick={() => { if (window.confirm('Delete all nodes in this route?')) deleteRouteGroup(activeGroupId) }}
             style={{ ...tbBtn, background: 'rgba(255,107,107,.1)', border: '1px solid rgba(255,107,107,.25)', color: 'var(--red)' }}>
             Delete
           </button>
         )}
 
-        <button onClick={() => setShareOpen(!shareOpen)}
-          style={{ padding: '5px 12px', borderRadius: 7, background: 'var(--acc)', color: '#fff', border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0, fontFamily: 'inherit' }}>
+        <button onClick={() => setShareOpen(!shareOpen)} style={{ padding: '5px 12px', borderRadius: 7, background: 'var(--acc)', color: '#fff', border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0, fontFamily: 'inherit' }}>
           Share
         </button>
       </div>
@@ -787,7 +895,7 @@ export default function Builder() {
         {/* ── LEFT SIDEBAR ── */}
         <div className="builder-sidebar" style={{ width: 210, background: 'var(--s1)', borderRight: '1px solid var(--b1)', display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
 
-          {/* ── StreamRoutes folder ── */}
+          {/* StreamRoutes folder */}
           <div style={{ borderBottom: '1px solid var(--b1)', flexShrink: 0 }}>
             <div style={{ padding: '10px 12px 6px', fontSize: 11, fontWeight: 700, color: 'var(--t1)' }}>StreamRoutes</div>
             <div style={{ padding: '0 10px 8px' }}>
@@ -812,7 +920,7 @@ export default function Builder() {
             </div>
           </div>
 
-          {/* ── Video Library ── */}
+          {/* Video Library */}
           <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid var(--b1)', flexShrink: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t1)', marginBottom: 4 }}>Video Library</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'var(--s3)', border: '1px solid var(--b2)', borderRadius: 7, padding: '5px 8px', marginBottom: 4 }}>
@@ -927,7 +1035,7 @@ export default function Builder() {
                 const isLeaf = !node.isRoot && !hasOut
                 const elCnt = (routeEls[node.id] || []).length
                 return (
-                  <div key={node.id} id={'bn-' + node.id} className="node-card"
+                  <div key={node.id} id={'bn-' + node.id}
                     onMouseDown={e => onNodeMouseDown(e, node.id)}
                     onClick={e => { e.stopPropagation(); setSidebarOpen(false); openEditor(node.id) }}
                     style={{
@@ -937,7 +1045,8 @@ export default function Builder() {
                       borderRadius: 13, overflow: 'hidden', cursor: 'pointer',
                       boxShadow: isEdit
                         ? `0 0 0 3px ${node.color}40,0 10px 40px rgba(0,0,0,.6)`
-                        : isSel ? `0 0 0 2px ${node.color}30,0 6px 24px rgba(0,0,0,.4)`
+                        : isSel
+                          ? `0 0 0 2px ${node.color}30,0 6px 24px rgba(0,0,0,.4)`
                           : '0 4px 18px rgba(0,0,0,.3)',
                       transition: 'all .15s', userSelect: 'none',
                       opacity: node._saving ? 0.55 : 1,
@@ -950,7 +1059,7 @@ export default function Builder() {
                       {node.isRoot && <div style={{ position: 'absolute', top: 4, left: 6, fontSize: 8, fontWeight: 800, color: node.color, background: `${node.color}22`, border: `1px solid ${node.color}44`, padding: '1px 6px', borderRadius: 100 }}>ENTRY</div>}
                       {isEdit && <div style={{ position: 'absolute', top: 4, right: 6, fontSize: 8, fontWeight: 800, color: '#fff', background: node.color, padding: '1px 6px', borderRadius: 3 }}>● EDITING</div>}
                       <div style={{ position: 'absolute', bottom: 3, right: 6, fontSize: 8, color: 'var(--t3)' }}>{fmt(node.duration)}</div>
-                      <button className="node-remove-btn" onClick={e => { e.stopPropagation(); removeNode(node.id) }}
+                      <button onClick={e => { e.stopPropagation(); removeNode(node.id) }}
                         style={{ position: 'absolute', top: 3, right: isEdit ? 52 : 6, width: 20, height: 20, borderRadius: 6, background: 'rgba(0,0,0,.7)', border: '1px solid rgba(255,107,107,.4)', color: 'var(--red)', fontSize: 11, cursor: 'pointer', display: 'none', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1, fontFamily: 'inherit' }}>
                         ✕
                       </button>
@@ -965,13 +1074,15 @@ export default function Builder() {
                     </div>
                     {(node.choicePoints || []).length > 0 && (
                       <div style={{ borderTop: '1px solid var(--b1)', padding: '4px 10px 5px' }}>
-                        {(node.choicePoints || []).flatMap(cp => (cp.choices || []).map(ch => (
-                          <div key={ch.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--t3)', marginBottom: 1 }}>
-                            <div style={{ width: 5, height: 5, borderRadius: '50%', background: ch.color || node.color, flexShrink: 0 }} />
-                            {ch.icon} {ch.label}
-                            {ch.targetId && <span style={{ color: 'var(--acc)', opacity: .7 }}> → {canvasNodes.find(r => r.id === ch.targetId)?.title}</span>}
-                          </div>
-                        )))}
+                        {(node.choicePoints || []).flatMap(cp =>
+                          (cp.choices || []).map(ch => (
+                            <div key={ch.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--t3)', marginBottom: 1 }}>
+                              <div style={{ width: 5, height: 5, borderRadius: '50%', background: ch.color || node.color, flexShrink: 0 }} />
+                              {ch.icon} {ch.label}
+                              {ch.targetId && <span style={{ color: 'var(--acc)', opacity: .7 }}> → {canvasNodes.find(r => r.id === ch.targetId)?.title}</span>}
+                            </div>
+                          ))
+                        )}
                       </div>
                     )}
                     <div style={{ padding: '4px 10px 7px', fontSize: 9, color: isEdit ? node.color : 'var(--t3)' }}>
@@ -982,7 +1093,7 @@ export default function Builder() {
               })}
             </div>
 
-            {/* Empty state */}
+            {/* Empty states */}
             {canvasNodes.length === 0 && !routesLoading && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
                 <div style={{ fontSize: 38, marginBottom: 12, opacity: .2 }}>🎬</div>
@@ -1000,7 +1111,9 @@ export default function Builder() {
               Drag to pan · Scroll to zoom · Click a card to open editor
             </div>
 
-            {canvasNodes.length > 0 && !editNode && <Minimap nodes={canvasNodes} editingNodeId={editingNodeId} />}
+            {canvasNodes.length > 0 && !editNode && (
+              <Minimap nodes={canvasNodes} editingNodeId={editingNodeId} />
+            )}
           </div>
 
           {/* ── ELEMENTS EDITOR ── */}
@@ -1016,6 +1129,68 @@ export default function Builder() {
                 onChange={newEls => handleElChange(editNode.id, newEls)}
                 onNodeChange={updateNode}
                 onClose={() => setEditingNodeId(null)}
+                // ✅ CREATE — POST new element scoped to this route node
+                onCreateElement={editNode.videoId ? async (canvasEl) => {
+                  const res = await fetch(`/api/videos/${editNode.videoId}/elements`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      type: canvasEl.type,
+                      route_id: editNode.id,          // ✅ scoped to route node
+                      x: Math.round(canvasEl.xPct ?? 10),
+                      y: Math.round(canvasEl.yPct ?? 10),
+                      w: Math.round(canvasEl.wPct ?? 40),
+                      h: Math.round(canvasEl.hPct ?? 25),
+                      z_index: canvasEl.zIndex ?? 1,
+                      opacity: canvasEl.opacity ?? 1,
+                      props: canvasEl.props ?? {},
+                      timing: canvasEl.timing ?? {},
+                      gate: canvasEl.gate ?? null,
+                      conditions: canvasEl.conditions ?? [],
+                    }),
+                  })
+                  const json = await res.json()
+                  if (!res.ok) throw new Error(json.error)
+                  const el = json.element
+                  return {
+                    id: el.id,
+                    type: el.type,
+                    props: el.props || {},
+                    xPct: el.x ?? 10,
+                    yPct: el.y ?? 10,
+                    wPct: el.w ?? 40,
+                    hPct: el.h ?? 25,
+                    timing: el.timing || {},
+                    gate: el.gate || { enabled: false },
+                    conditions: el.conditions || [],
+                    opacity: el.opacity ?? 1,
+                    zIndex: el.z_index ?? 1,
+                    sort_order: el.sort_order ?? 0,
+                  }
+                } : undefined}
+                // ✅ UPDATE — PATCH element by id
+                onUpdateElement={editNode.videoId ? async (id, canvasEl) => {
+                  await fetch(`/api/elements/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      x: Math.round(canvasEl.xPct ?? 10),
+                      y: Math.round(canvasEl.yPct ?? 10),
+                      w: Math.round(canvasEl.wPct ?? 40),
+                      h: Math.round(canvasEl.hPct ?? 25),
+                      props: canvasEl.props,
+                      timing: canvasEl.timing,
+                      gate: canvasEl.gate,
+                      conditions: canvasEl.conditions,
+                      opacity: canvasEl.opacity,
+                      z_index: canvasEl.zIndex,
+                    }),
+                  })
+                } : undefined}
+                // ✅ DELETE — DELETE element by id
+                onDeleteElement={editNode.videoId ? async (id) => {
+                  await fetch(`/api/elements/${id}`, { method: 'DELETE' })
+                } : undefined}
               />
             </div>
           )}
@@ -1024,7 +1199,9 @@ export default function Builder() {
         {/* ── NODE CONFIG PANEL ── */}
         {selNode && !editNode && (
           <NodeConfigPanel
-            node={selNode} allNodes={canvasNodes} edges={edges}
+            node={selNode}
+            allNodes={canvasNodes}
+            edges={edges}
             onChange={patch => updateNode(selNode.id, patch)}
             onClose={() => setSelNodeId(null)}
             onDelete={() => removeNode(selNode.id)}
@@ -1061,16 +1238,20 @@ export default function Builder() {
         />
       )}
 
-      {/* ════ MODALS ════ */}
+      {/* ════ NEW ROUTE MODAL ════ */}
       {newRouteModal && (
         <Modal onClose={() => setNewRouteModal(false)}>
           <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--t1)', marginBottom: 4 }}>Create New Route</div>
           <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 16 }}>Give your StreamRoute a name to get started</div>
           <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: .5, display: 'block', marginBottom: 6 }}>Route Name</label>
-          <input autoFocus value={newRouteName} onChange={e => setNewRouteName(e.target.value)}
+          <input
+            autoFocus
+            value={newRouteName}
+            onChange={e => setNewRouteName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && confirmNewRoute()}
             placeholder="e.g. Buyer Journey, Listing Walkthrough..."
-            style={{ width: '100%', background: 'var(--s3)', border: '1px solid var(--b2)', borderRadius: 9, padding: '12px 14px', color: 'var(--t1)', fontSize: 14, marginBottom: 16, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' }} />
+            style={{ width: '100%', background: 'var(--s3)', border: '1px solid var(--b2)', borderRadius: 9, padding: '12px 14px', color: 'var(--t1)', fontSize: 14, marginBottom: 16, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' }}
+          />
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => setNewRouteModal(false)} style={{ flex: 1, padding: 11, borderRadius: 9, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
             <button onClick={confirmNewRoute} style={{ flex: 1, padding: 11, borderRadius: 9, background: 'var(--acc)', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Create Route</button>
@@ -1078,13 +1259,14 @@ export default function Builder() {
         </Modal>
       )}
 
+      {/* ════ UNSAVED CHANGES MODAL ════ */}
       {unsavedModal && (
         <Modal onClose={() => setUnsavedModal(false)} zIndex={9999}>
           <div style={{ fontSize: 24, textAlign: 'center', marginBottom: 12 }}>⚠️</div>
           <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--t1)', textAlign: 'center', marginBottom: 6 }}>Unsaved Changes</div>
           <div style={{ fontSize: 12, color: 'var(--t2)', textAlign: 'center', lineHeight: 1.6, marginBottom: 22 }}>You have unsaved changes. Save before switching routes?</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button onClick={() => { saveRoute(); doLoad(pendingGroupId); setUnsavedModal(false) }} style={{ width: '100%', padding: 11, borderRadius: 10, background: 'var(--acc)', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Save & Switch</button>
+            <button onClick={() => { saveRoute(); doLoad(pendingGroupId); setUnsavedModal(false) }} style={{ width: '100%', padding: 11, borderRadius: 10, background: 'var(--acc)', border: 'none', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Save &amp; Switch</button>
             <button onClick={() => { doLoad(pendingGroupId); setUnsavedModal(false) }} style={{ width: '100%', padding: 11, borderRadius: 10, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--red)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Discard Changes</button>
             <button onClick={() => setUnsavedModal(false)} style={{ width: '100%', padding: 11, borderRadius: 10, background: 'none', border: '1px solid var(--b1)', color: 'var(--t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
           </div>
@@ -1128,28 +1310,45 @@ function NodeConfigPanel({ node, allNodes, edges, onChange, onClose, onDelete, o
   const connectedTo = edges.filter(e => e.from.id === node.id).map(e => e.to.id)
   const canConn = allNodes.filter(n => n.id !== node.id && !connectedTo.includes(n.id))
 
-  function addCP() { onChange({ choicePoints: [...(node.choicePoints || []), { id: `cp_${Date.now()}`, triggerAt: 60, question: 'What would you like to do next?', subtitle: 'Choose your path', choices: [] }] }) }
-  function removeCP(id) { onChange({ choicePoints: (node.choicePoints || []).filter(c => c.id !== id) }) }
-  function updateCP(id, p) { onChange({ choicePoints: (node.choicePoints || []).map(c => c.id === id ? { ...c, ...p } : c) }) }
+  function addCP() {
+    onChange({
+      choicePoints: [
+        ...(node.choicePoints || []),
+        { id: `cp_${Date.now()}`, triggerAt: 60, question: 'What would you like to do next?', subtitle: 'Choose your path', choices: [] },
+      ],
+    })
+  }
+  function removeCP(id) {
+    onChange({ choicePoints: (node.choicePoints || []).filter(c => c.id !== id) })
+  }
+  function updateCP(id, p) {
+    onChange({ choicePoints: (node.choicePoints || []).map(c => c.id === id ? { ...c, ...p } : c) })
+  }
   function addChoice(cpId) {
     onChange({
       choicePoints: (node.choicePoints || []).map(cp => cp.id === cpId ? {
-        ...cp, choices: [...(cp.choices || []), { id: `ch_${Date.now()}`, label: `Option ${(cp.choices?.length || 0) + 1}`, icon: '▶', color: node.color, targetId: null }]
-      } : cp)
+        ...cp,
+        choices: [
+          ...(cp.choices || []),
+          { id: `ch_${Date.now()}`, label: `Option ${(cp.choices?.length || 0) + 1}`, icon: '▶', color: node.color, targetId: null },
+        ],
+      } : cp),
     })
   }
   function updateChoice(cpId, chId, p) {
     onChange({
       choicePoints: (node.choicePoints || []).map(cp => cp.id === cpId ? {
-        ...cp, choices: (cp.choices || []).map(ch => ch.id === chId ? { ...ch, ...p } : ch)
-      } : cp)
+        ...cp,
+        choices: (cp.choices || []).map(ch => ch.id === chId ? { ...ch, ...p } : ch),
+      } : cp),
     })
   }
   function removeChoice(cpId, chId) {
     onChange({
       choicePoints: (node.choicePoints || []).map(cp => cp.id === cpId ? {
-        ...cp, choices: (cp.choices || []).filter(ch => ch.id !== chId)
-      } : cp)
+        ...cp,
+        choices: (cp.choices || []).filter(ch => ch.id !== chId),
+      } : cp),
     })
   }
 
@@ -1209,7 +1408,8 @@ function NodeConfigPanel({ node, allNodes, edges, onChange, onClose, onDelete, o
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: .5 }}>CONNECTIONS</div>
             {connectedTo.map(id => {
-              const tn = allNodes.find(n => n.id === id); if (!tn) return null
+              const tn = allNodes.find(n => n.id === id)
+              if (!tn) return null
               return (
                 <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 9px', borderRadius: 8, background: 'var(--s3)', border: '1px solid var(--b2)', marginBottom: 5 }}>
                   <div style={{ width: 7, height: 7, borderRadius: '50%', background: tn.color, flexShrink: 0 }} />
@@ -1223,27 +1423,6 @@ function NodeConfigPanel({ node, allNodes, edges, onChange, onClose, onDelete, o
 
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: .5 }}>CHOICE POINTS</div>
-          {(node.choicePoints || []).length > 0 && (
-            <div style={{ marginBottom: 16, background: 'var(--s3)', borderRadius: 9, padding: '10px 12px' }}>
-              <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--t2)', marginBottom: 8 }}>Timeline ({fmt(node.duration)})</div>
-              <div style={{ position: 'relative', height: 28, background: 'var(--s4)', borderRadius: 6, overflow: 'hidden' }}>
-                {[0, 0.25, 0.5, 0.75, 1].map(pct => (
-                  <div key={pct} style={{ position: 'absolute', left: `${pct * 100}%`, top: 0, bottom: 0, width: 1, background: 'var(--b2)' }} />
-                ))}
-                {(node.choicePoints || []).map((cp, idx) => {
-                  const pct = Math.min(((cp.triggerAt || 0) / node.duration) * 100, 100)
-                  return (
-                    <div key={cp.id} style={{ position: 'absolute', left: `${pct}%`, top: '50%', transform: 'translate(-50%,-50%)', width: 20, height: 20, borderRadius: '50%', background: node.color, border: '2px solid var(--s3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#fff', fontWeight: 800, boxShadow: `0 0 8px ${node.color}60` }}>
-                      {idx + 1}
-                    </div>
-                  )
-                })}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 8, color: 'var(--t3)' }}>
-                <span>0:00</span><span>{fmt(node.duration * 0.25)}</span><span>{fmt(node.duration * 0.5)}</span><span>{fmt(node.duration * 0.75)}</span><span>{fmt(node.duration)}</span>
-              </div>
-            </div>
-          )}
           {(node.choicePoints || []).map(cp => (
             <div key={cp.id} style={{ background: 'var(--s3)', borderRadius: 9, padding: 10, marginBottom: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
@@ -1251,7 +1430,8 @@ function NodeConfigPanel({ node, allNodes, edges, onChange, onClose, onDelete, o
                 <button onClick={() => removeCP(cp.id)} style={{ fontSize: 9, color: 'var(--red)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>Remove</button>
               </div>
               <Inp val={cp.question} onChg={v => updateCP(cp.id, { question: v })} ph="Question text..." />
-              <input type="number" value={cp.triggerAt || 0} min={0} onChange={e => updateCP(cp.id, { triggerAt: +e.target.value })}
+              <input type="number" value={cp.triggerAt || 0} min={0}
+                onChange={e => updateCP(cp.id, { triggerAt: +e.target.value })}
                 style={{ width: '100%', background: 'var(--s4)', border: '1px solid var(--b2)', borderRadius: 7, padding: '6px 9px', color: 'var(--t1)', fontSize: 11, marginBottom: 7, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' }} />
               {(cp.choices || []).map(ch => (
                 <div key={ch.id} style={{ background: 'var(--s2)', borderRadius: 7, padding: 8, marginBottom: 6 }}>
@@ -1265,7 +1445,9 @@ function NodeConfigPanel({ node, allNodes, edges, onChange, onClose, onDelete, o
                   <select value={ch.targetId || ''} onChange={e => updateChoice(cp.id, ch.id, { targetId: e.target.value })}
                     style={{ width: '100%', background: 'var(--s3)', border: '1px solid var(--b2)', borderRadius: 6, padding: '5px 8px', color: 'var(--t1)', fontSize: 10, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' }}>
                     <option value="">Select target video...</option>
-                    {allNodes.filter(n => n.id !== node.id).map(n => <option key={n.id} value={n.id}>{n.title}</option>)}
+                    {allNodes.filter(n => n.id !== node.id).map(n => (
+                      <option key={n.id} value={n.id}>{n.title}</option>
+                    ))}
                   </select>
                 </div>
               ))}
@@ -1284,7 +1466,7 @@ function NodeConfigPanel({ node, allNodes, edges, onChange, onClose, onDelete, o
   )
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════��════════════════════════════════════════════════════════════
 // TINY HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 function Modal({ children, onClose, zIndex = 999 }) {

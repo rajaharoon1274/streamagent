@@ -1,5 +1,5 @@
 // app/api/player/[video_id]/route.js
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────��───────────────────────────────────────────────────
 // PUBLIC endpoint — NO JWT required.
 // Returns everything the player needs to render: video meta, elements, branding.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7,8 +7,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
-// Use service-role so RLS public policies apply correctly
-// (el_public & vid_public policies allow SELECT on published/password videos)
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -82,8 +80,32 @@ export async function GET(req, { params }) {
         console.error('[player API] elements fetch error:', elErr.message)
     }
 
-    // ── 4. Strip sensitive data before returning ─────────────────────────────
-    // Never send the actual password — only a flag that one is required
+    // ── 4. Remap DB column names → frontend shape ─────────────────────────────
+    // overlay_renderer.jsx uses x/y/w/h/z_index (DB names)
+    // WatchClient / ElementCanvas use xPct/yPct/wPct/hPct/zIndex (frontend names)
+    // Expose both so every consumer works without further mapping
+    const mappedElements = (elements || []).map(el => ({
+        id: el.id,
+        type: el.type,
+        props: el.props || {},
+        x: el.x ?? 10,
+        y: el.y ?? 10,
+        w: el.w ?? 40,
+        h: el.h ?? 25,
+        xPct: el.x ?? 10,
+        yPct: el.y ?? 10,
+        wPct: el.w ?? 40,
+        hPct: el.h ?? 25,
+        z_index: el.z_index ?? 1,
+        zIndex: el.z_index ?? 1,
+        opacity: el.opacity ?? 1,
+        timing: el.timing || { mode: 'at-time', in: 0, duration: 5, animIn: 'fadeIn', animOut: 'fadeOut', animSpeed: '0.4', trigger: 'time' },
+        gate: el.gate || { enabled: false },
+        conditions: el.conditions || [],
+        sort_order: el.sort_order,
+    }))
+
+    // ── 5. Strip sensitive data before returning ─────────────────────────────
     const { password: _pw, workspace_id: _wsId, ...safeVideo } = video
 
     return NextResponse.json(
@@ -92,7 +114,7 @@ export async function GET(req, { params }) {
                 ...safeVideo,
                 requires_password: video.privacy === 'password',
             },
-            elements: elements || [],
+            elements: mappedElements,
             workspace: {
                 id: video.workspace_id,
                 bandwidth_gated: workspace?.bandwidth_gated ?? false,
@@ -103,8 +125,7 @@ export async function GET(req, { params }) {
         {
             status: 200,
             headers: {
-                // Cache for 10 s at edge, revalidate in background
-                'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=60',
+                'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=10',
                 'Access-Control-Allow-Origin': '*',
             },
         },

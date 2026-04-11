@@ -6,7 +6,7 @@ import { EL_TYPES, EL_CATS, getTypesByCategory } from './elTypes'
 // ── Single draggable element card ─────────────────────────────────────────────
 function PaletteCard({ type, def, onDblClick }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id:   type,
+    id: type,
     data: { type, label: def.label, icon: def.icon, color: def.color },
   })
 
@@ -25,7 +25,7 @@ function PaletteCard({ type, def, onDblClick }) {
         userSelect: 'none',
       }}
       onMouseOver={e => { if (!isDragging) { e.currentTarget.style.borderColor = `${def.color}66`; e.currentTarget.style.background = 'var(--s2)' } }}
-      onMouseOut={e  => { if (!isDragging) { e.currentTarget.style.borderColor = 'var(--b2)';       e.currentTarget.style.background = 'var(--bg)'  } }}
+      onMouseOut={e => { if (!isDragging) { e.currentTarget.style.borderColor = 'var(--b2)'; e.currentTarget.style.background = 'var(--bg)' } }}
     >
       {/* Icon + title row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 5 }}>
@@ -51,13 +51,27 @@ function PaletteCard({ type, def, onDblClick }) {
 
 // ── Palette container ─────────────────────────────────────────────────────────
 export default function ElementPalette({ onDblClick }) {
-  const [cat,     setCat]     = useState('capture')
+  // ── Persist active category tab across refreshes ──────────────────────────
+  const [cat, setCat] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('elementPaletteTab') || 'capture'
+    }
+    return 'capture'
+  })
+
   const [showAll, setShowAll] = useState(false)
 
+  // ── Tab change: update state + persist to sessionStorage ──────────────────
+  function handleCatChange(id) {
+    setCat(id)
+    setShowAll(false)
+    sessionStorage.setItem('elementPaletteTab', id)
+  }
+
   const allTypes = getTypesByCategory(cat)
-  const INITIAL  = 5
-  const visible  = (!showAll && allTypes.length > INITIAL) ? allTypes.slice(0, INITIAL) : allTypes
-  const hasMore  = allTypes.length > INITIAL
+  const INITIAL = 5
+  const visible = (!showAll && allTypes.length > INITIAL) ? allTypes.slice(0, INITIAL) : allTypes
+  const hasMore = allTypes.length > INITIAL
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -73,7 +87,7 @@ export default function ElementPalette({ onDblClick }) {
           {EL_CATS.map(c => (
             <button
               key={c.id}
-              onClick={() => { setCat(c.id); setShowAll(false) }}
+              onClick={() => handleCatChange(c.id)}
               style={{
                 padding: '5px 8px', borderRadius: 7, fontSize: 10, fontWeight: 600,
                 cursor: 'pointer', lineHeight: 1.3, textAlign: 'center',
@@ -91,7 +105,7 @@ export default function ElementPalette({ onDblClick }) {
       {/* ── Element list ── */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 10px 14px' }}>
         {visible.map(([type, def]) => (
-          <PaletteCard key={type} type={type} def={def} onDblClick={onDblClick || (() => {})} />
+          <PaletteCard key={type} type={type} def={def} onDblClick={onDblClick || (() => { })} />
         ))}
 
         {hasMore && (
