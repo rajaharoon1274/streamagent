@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, getWorkspace } from '@/lib/auth'
+import { dispatchLead } from '@/lib/integrations/dispatch'  // ← ADD
 
 const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -62,7 +63,6 @@ export async function GET(req) {
         const from = (page - 1) * limit
         const to = from + limit - 1
 
-        // Build query — select leads with joined video title
         let query = supabaseAdmin
             .from('leads')
             .select(`
@@ -71,20 +71,17 @@ export async function GET(req) {
       `, { count: 'exact' })
             .eq('workspace_id', workspace.id)
 
-        // ── Filters ──
         if (video_id) query = query.eq('video_id', video_id)
         if (status && status !== 'all') query = query.eq('status', status)
         if (tag) query = query.contains('tags', [tag])
         if (date_from) query = query.gte('created_at', date_from)
         if (date_to) query = query.lte('created_at', date_to + 'T23:59:59.999Z')
 
-        // ── Search (name, email, phone) ──
         if (search) {
             const s = `%${search}%`
             query = query.or(`email.ilike.${s},name.ilike.${s},phone.ilike.${s}`)
         }
 
-        // ── Sorting ──
         switch (sort) {
             case 'oldest': query = query.order('created_at', { ascending: true }); break
             case 'score_high': query = query.order('score', { ascending: false }); break
@@ -95,7 +92,6 @@ export async function GET(req) {
             default: query = query.order('created_at', { ascending: false }); break
         }
 
-        // ── Pagination ──
         query = query.range(from, to)
 
         const { data, error, count } = await query
@@ -120,8 +116,7 @@ export async function GET(req) {
 
 /* ─── POST /api/leads ────────────────────────────────────────────────────────
    Public endpoint — called from the player when a viewer submits a gate.
-   (Keeping your existing logic unchanged.)
-────────────────────────────────────────────────────────────────────────────── */
+────────────────────────────────────────────��───────────────────────────────── */
 export async function POST(req) {
     try {
         const body = await req.json()
@@ -154,7 +149,7 @@ export async function POST(req) {
             )
         }
 
-        // lid: merge into existing lead
+        // lid: merge survey responses into existing lead
         if (lid) {
             const { data: existing } = await supabaseAdmin
                 .from('leads')
@@ -218,13 +213,16 @@ export async function POST(req) {
                 rewatch_count: 0,
                 lead_magnet_sent: false,
             })
-            .select('id')
+            .select('*')
             .single()
 
         if (error) {
             console.error('[leads] insert error:', error)
             return NextResponse.json({ error: 'Failed to save lead' }, { status: 500 })
         }
+
+        // Fire-and-forget dispatch to CRMs + webhooks  // ← ADD
+        dispatchLead(supabaseAdmin, workspace_id, lead)  // ← ADD
 
         return NextResponse.json({ success: true, id: lead.id }, { status: 201 })
 
