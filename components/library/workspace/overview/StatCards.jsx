@@ -1,17 +1,13 @@
 'use client'
+import { useState, useEffect } from 'react'
 import SparklineChart from '@/components/ui/SparklineChart'
-
-// Matches HTML statCard() exactly:
-// background:var(--s2);border:1px solid var(--b2);border-radius:14px;padding:16px 18px
-// label top-left, icon top-right in colored circle
-// big value, sub-text + sparkline bottom row
 
 function StatCard({ label, value, sub, color, icon }) {
   const icons = {
-    eye:  <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>,
+    eye: <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>,
     play: <polygon points="5,3 19,12 5,21" />,
-    zap:  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
-    mail: <><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></>,
+    zap: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
+    mail: <><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></>,
   }
   return (
     <div style={{ background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 14, padding: '16px 18px' }}>
@@ -33,12 +29,24 @@ function StatCard({ label, value, sub, color, icon }) {
 }
 
 export default function StatCards({ video: v }) {
+  const [leadCount, setLeadCount] = useState(v.lead_count ?? null)
+
+  useEffect(() => {
+    // If lead_count wasn't pre-fetched, fetch it now
+    if (leadCount !== null) return
+    fetch(`/api/videos/${v.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.lead_count !== undefined) setLeadCount(d.lead_count) })
+      .catch(() => { })
+  }, [v.id]) // eslint-disable-line
+
   const cards = [
-    { label: 'Views',       value: v.views?.toLocaleString() ?? '0', sub: 'This video',     color: '#4F6EF7', icon: 'eye'  },
-    { label: 'Plays',       value: v.plays?.toLocaleString() ?? '0', sub: 'Total plays',    color: '#06B6D4', icon: 'play' },
-    { label: 'Engagement',  value: `${v.eng ?? 0}%`,                 sub: 'Avg watch depth', color: '#1ED8A0', icon: 'zap'  },
-    { label: 'Leads',       value: '—',                              sub: 'From this video', color: '#F5A623', icon: 'mail' },
+    { label: 'Views', value: (v.views || 0).toLocaleString(), sub: 'This video', color: '#4F6EF7', icon: 'eye' },
+    { label: 'Plays', value: (v.plays || 0).toLocaleString(), sub: 'Total plays', color: '#06B6D4', icon: 'play' },
+    { label: 'Engagement', value: `${v.eng ?? 0}%`, sub: 'Avg watch depth', color: '#1ED8A0', icon: 'zap' },
+    { label: 'Leads', value: leadCount !== null ? leadCount.toLocaleString() : '—', sub: 'From this video', color: '#F5A623', icon: 'mail' },
   ]
+
   return (
     <div className="lib-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
       {cards.map(c => <StatCard key={c.label} {...c} />)}

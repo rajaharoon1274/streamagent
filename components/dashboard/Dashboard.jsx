@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '@/context/AppContext'
 import { MOCK_VIDEOS, INIT_ROUTES } from '@/lib/mockData'
 
-// ── tiny sparkline matching the HTML statCard sparkline ──────────────────────
+// ── tiny sparkline ────────────────────────────────────────────────────────────
 function Sparkline({ color }) {
   const pts = [40, 55, 45, 70, 60, 80, 72]
   const points = pts.map((v, i) =>
@@ -18,13 +18,13 @@ function Sparkline({ color }) {
   )
 }
 
-// ── stat card matching HTML statCard() exactly ────────────────────────────────
+// ── stat card ─────────────────────────────────────────────────────────────────
 function StatCard({ label, value, sub, color, icon }) {
   const icons = {
-    eye:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
-    play:   <svg width="14" height="14" viewBox="0 0 24 24" fill={color}><polygon points="5,3 19,12 5,21"/></svg>,
-    zap:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg>,
-    branch: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>,
+    eye: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>,
+    play: <svg width="14" height="14" viewBox="0 0 24 24" fill={color}><polygon points="5,3 19,12 5,21" /></svg>,
+    zap: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10" /></svg>,
+    branch: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M18 9a9 9 0 01-9 9" /></svg>,
   }
   return (
     <div style={{ background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 14, padding: '16px 18px' }}>
@@ -62,27 +62,26 @@ function RingChart({ pct, color }) {
 // ── goals section ─────────────────────────────────────────────────────────────
 function GoalsSection({ goals, setGoals }) {
   const [showModal, setShowModal] = useState(false)
-  const [editId, setEditId]       = useState(null)
-  const [newGoal, setNewGoal]     = useState({ type: 'leads', target: '', period: 'month' })
-  // Use a stable default (15 = mid-month) on server; update to real date on client
+  const [editId, setEditId] = useState(null)
+  const [newGoal, setNewGoal] = useState({ type: 'leads', target: '', period: 'month' })
   const [todayDate, setTodayDate] = useState(15)
   useEffect(() => { setTodayDate(new Date().getDate()) }, [])
 
   const GOAL_TYPES = {
-    leads:      { label: '⚡ Leads Captured', unit: '' },
-    views:      { label: '👁 Video Views',    unit: '' },
-    plays:      { label: '▶ Video Plays',     unit: '' },
+    leads: { label: '⚡ Leads Captured', unit: '' },
+    views: { label: '👁 Video Views', unit: '' },
+    plays: { label: '▶ Video Plays', unit: '' },
     completion: { label: '🎯 Avg Watch Depth', unit: '%' },
-    cta_clicks: { label: '🔗 CTA Clicks',     unit: '' },
-    videos:     { label: '🎬 Videos Published',unit: '' },
+    cta_clicks: { label: '🔗 CTA Clicks', unit: '' },
+    videos: { label: '🎬 Videos Published', unit: '' },
   }
 
   function addGoal() {
     if (!newGoal.target) return
     const info = GOAL_TYPES[newGoal.type]
-    const colors = ['#4F6EF7','#1ED8A0','#F5A623','#A855F7','#FF6B6B','#06B6D4']
+    const colors = ['#4F6EF7', '#1ED8A0', '#F5A623', '#A855F7', '#FF6B6B', '#06B6D4']
     setGoals(prev => [...prev, {
-      id: Date.now(), label: info.label.replace(/^.+? /,''),
+      id: Date.now(), label: info.label.replace(/^.+? /, ''),
       current: 0, target: +newGoal.target, unit: info.unit,
       period: newGoal.period, color: colors[prev.length % colors.length]
     }])
@@ -123,7 +122,7 @@ function GoalsSection({ goals, setGoals }) {
               {isEditing ? (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                    {['current','target'].map(k => (
+                    {['current', 'target'].map(k => (
                       <div key={k} style={{ flex: 1 }}>
                         <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--t3)', marginBottom: 2, textTransform: 'capitalize' }}>{k}</div>
                         <input type="number" defaultValue={g[k]}
@@ -196,35 +195,34 @@ function GoalsSection({ goals, setGoals }) {
   )
 }
 
-// ── constants ─────────────────────────────────────────────────────────────────
+// ── constants (static — unchanged) ───────────────────────────────────────────
 const HOT_LEADS = [
-  { name: 'Sarah Chen',  email: 'sarah@meridianfin.com', phone: '(310) 555-0192', score: 94, video: 'Platform Overview',  watchPct: 92,  action: 'Clicked Book a Call 2x',         signal: '🔥 Ready to close',   color: '#FF6B6B', suggestion: 'She watched 92% and hit the booking CTA twice without completing. A quick personal follow-up could close this.' },
-  { name: 'Mike Torres', email: 'mike.t@remax.com',      phone: '(424) 555-0847', score: 87, video: 'Refinance Guide',     watchPct: 100, action: 'Rewatched 3x this week',           signal: '🔄 In decision mode', color: '#F5A623', suggestion: 'Three rewatches signals serious interest but hesitation. Send a short personal video addressing common concerns.' },
-  { name: 'Lisa Park',   email: 'lisa@kwrealty.com',     phone: '(818) 555-7741', score: 78, video: 'Lead Gen Training',   watchPct: 85,  action: 'Downloaded guide + shared link',   signal: '⚡ High engagement',  color: '#1ED8A0', suggestion: 'She is consuming content AND sharing it. This is a champion — offer her early access or a referral bonus.' },
+  { name: 'Sarah Chen', email: 'sarah@meridianfin.com', phone: '(310) 555-0192', score: 94, video: 'Platform Overview', watchPct: 92, action: 'Clicked Book a Call 2x', signal: '🔥 Ready to close', color: '#FF6B6B', suggestion: 'She watched 92% and hit the booking CTA twice without completing. A quick personal follow-up could close this.' },
+  { name: 'Mike Torres', email: 'mike.t@remax.com', phone: '(424) 555-0847', score: 87, video: 'Refinance Guide', watchPct: 100, action: 'Rewatched 3x this week', signal: '🔄 In decision mode', color: '#F5A623', suggestion: 'Three rewatches signals serious interest but hesitation. Send a short personal video addressing common concerns.' },
+  { name: 'Lisa Park', email: 'lisa@kwrealty.com', phone: '(818) 555-7741', score: 78, video: 'Lead Gen Training', watchPct: 85, action: 'Downloaded guide + shared link', signal: '⚡ High engagement', color: '#1ED8A0', suggestion: 'She is consuming content AND sharing it. This is a champion — offer her early access or a referral bonus.' },
 ]
 
 const WEEKLY = [42, 67, 55, 80, 91, 74, 88]
-const DAYS   = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 const LIVE_ACTIVITY = [
-  { icon: '🎯', color: '#1ED8A0', text: 'Lead captured',  detail: 'mike.r@gmail.com · Lead Strategy',          time: '2m' },
-  { icon: '▶',  color: '#4F6EF7', text: 'Video played',   detail: 'Platform Overview · Chicago IL',             time: '4m' },
-  { icon: '📈', color: '#A855F7', text: '75% milestone',  detail: 'Sales Presentation · Austin TX',             time: '7m' },
-  { icon: '🎯', color: '#1ED8A0', text: 'Lead captured',  detail: 'sarah.m@gmail.com · Follow-Up',              time: '12m' },
-  { icon: '▶',  color: '#06B6D4', text: 'Video played',   detail: 'Conversion Masterclass · Denver CO',         time: '18m' },
+  { icon: '🎯', color: '#1ED8A0', text: 'Lead captured', detail: 'mike.r@gmail.com · Lead Strategy', time: '2m' },
+  { icon: '▶', color: '#4F6EF7', text: 'Video played', detail: 'Platform Overview · Chicago IL', time: '4m' },
+  { icon: '📈', color: '#A855F7', text: '75% milestone', detail: 'Sales Presentation · Austin TX', time: '7m' },
+  { icon: '🎯', color: '#1ED8A0', text: 'Lead captured', detail: 'sarah.m@gmail.com · Follow-Up', time: '12m' },
+  { icon: '▶', color: '#06B6D4', text: 'Video played', detail: 'Conversion Masterclass · Denver CO', time: '18m' },
 ]
 
 const TOP_SOURCES = [
-  { title: 'Platform Overview',   leads: 89, pct: 42 },
-  { title: 'Lead Gen Guide',      leads: 64, pct: 30 },
-  { title: 'Follow-Up Sequence',  leads: 38, pct: 18 },
+  { title: 'Platform Overview', leads: 89, pct: 42 },
+  { title: 'Lead Gen Guide', leads: 64, pct: 30 },
+  { title: 'Follow-Up Sequence', leads: 38, pct: 18 },
 ]
 
-// ── default goals matching HTML ───────────────────────────────────────────────
 const DEFAULT_GOALS = [
-  { id: 'g1', label: 'Leads Captured', current: 212, target: 500, unit: '',  period: 'month',  color: '#1ED8A0' },
-  { id: 'g2', label: 'Video Views',    current: 6847, target: 10000, unit: '', period: 'month', color: '#4F6EF7' },
-  { id: 'g3', label: 'Avg Watch Depth',current: 58,  target: 70,  unit: '%', period: 'month',  color: '#F5A623' },
+  { id: 'g1', label: 'Leads Captured', current: 212, target: 500, unit: '', period: 'month', color: '#1ED8A0' },
+  { id: 'g2', label: 'Video Views', current: 6847, target: 10000, unit: '', period: 'month', color: '#4F6EF7' },
+  { id: 'g3', label: 'Avg Watch Depth', current: 58, target: 70, unit: '%', period: 'month', color: '#F5A623' },
 ]
 
 // ── main dashboard ────────────────────────────────────────────────────────────
@@ -232,49 +230,58 @@ export default function Dashboard() {
   const { state, goto } = useApp()
   const [goals, setGoals] = useState(state.dashGoals || DEFAULT_GOALS)
   const [chartRange, setChartRange] = useState('7D')
-  const [smsModal, setSmsModal] = useState(null) // { name, phone, video, email }
-  // Stable server default; updated to real hour on client to avoid hydration mismatch
+  const [smsModal, setSmsModal] = useState(null)
   const [greeting, setGreeting] = useState('Good morning')
+
+  // ── real API stats ─────────────────────────────────────────────────────────
+  const [apiStats, setApiStats] = useState(null)
+  const [statsLoading, setStatsLoading] = useState(true)
+
   useEffect(() => {
     const h = new Date().getHours()
     setGreeting(h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening')
   }, [])
 
-  const videos   = MOCK_VIDEOS || []
-  const total    = videos.reduce((a, v) => a + (v.views || 0), 0)
-  const totalP   = videos.reduce((a, v) => a + (v.plays || 0), 0)
-  const avgE     = videos.length ? Math.round(videos.reduce((a, v) => a + (v.eng || 0), 0) / videos.length) : 0
-  const totalCP  = INIT_ROUTES.reduce((a, r) => a + (r.choicePoints?.length || 0), 0)
-  const topVideo = [...videos].sort((a, b) => (b.views || 0) - (a.views || 0))[0]
+  useEffect(() => {
+    fetch('/api/analytics/overview')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && !d.error) setApiStats(d) })
+      .catch(() => { })
+      .finally(() => setStatsLoading(false))
+  }, [])
 
+  // ── fallback to mock data when API hasn't loaded yet ──────────────────────
+  const videos = MOCK_VIDEOS || []
+  const topVideo = [...videos].sort((a, b) => (b.views || 0) - (a.views || 0))[0]
+  const totalCP = INIT_ROUTES.reduce((a, r) => a + (r.choicePoints?.length || 0), 0)
   const wmax = Math.max(...WEEKLY)
+
+  // stat card values: real from API once loaded, mock until then
+  const totalViews = apiStats ? apiStats.totalViews : videos.reduce((a, v) => a + (v.views || 0), 0)
+  const totalPlays = apiStats ? apiStats.totalPlays : videos.reduce((a, v) => a + (v.plays || 0), 0)
+  const totalLeads = apiStats ? apiStats.totalLeads : 212
+  const totalVideos = apiStats ? apiStats.totalVideos : videos.length
+
+  // lead capture progress — real if available, else mock
+  const leadLimit = 500
+  const leadPct = Math.min(100, Math.round((totalLeads / leadLimit) * 100))
+  const leadRemain = Math.max(0, leadLimit - totalLeads)
 
   return (
     <div style={{ padding: '22px', maxWidth: 1400, animation: 'fadeIn 0.18s ease' }} className="dash-padding">
 
       <style jsx global>{`
         @media (max-width: 900px) {
-          .goals-grid {
-            grid-template-columns: repeat(2, 1fr) !important;
-          }
-          .dash-stats {
-            grid-template-columns: repeat(2, 1fr) !important;
-          }
-          .dash-hot-leads {
-            grid-template-columns: 1fr !important;
-          }
-          .dash-padding {
-            padding: 16px !important;
-          }
-          .dash-greeting {
-            font-size: 18px !important;
-          }
+          .goals-grid       { grid-template-columns: repeat(2, 1fr) !important; }
+          .dash-stats       { grid-template-columns: repeat(2, 1fr) !important; }
+          .dash-hot-leads   { grid-template-columns: 1fr !important; }
+          .dash-padding     { padding: 16px !important; }
+          .dash-greeting    { font-size: 18px !important; }
+          .dash-main        { grid-template-columns: 1fr !important; }
+          .dash-bottom      { grid-template-columns: 1fr !important; }
         }
         @media (max-width: 600px) {
-          .goals-grid {
-            grid-template-columns: repeat(2, 1fr) !important;
-            overflow-x: auto;
-          }
+          .goals-grid { grid-template-columns: repeat(2, 1fr) !important; overflow-x: auto; }
         }
       `}</style>
 
@@ -290,10 +297,30 @@ export default function Dashboard() {
 
       {/* ── Stat Cards ── */}
       <div className="dash-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 22 }}>
-        <StatCard label="Total Views"    value={total.toLocaleString()}  sub="+12% this week"             color="#4F6EF7" icon="eye" />
-        <StatCard label="Total Plays"    value={totalP.toLocaleString()} sub="+8% this week"              color="#06B6D4" icon="play" />
-        <StatCard label="Leads Captured" value="212"                     sub="212 of 500 this month"      color="#1ED8A0" icon="zap" />
-        <StatCard label="Choice Points"  value={totalCP}                 sub={`${INIT_ROUTES.length} active routes`} color="#F5A623" icon="branch" />
+        <StatCard
+          label="Total Views"
+          value={statsLoading ? '—' : totalViews.toLocaleString()}
+          sub={apiStats ? 'All time' : '+12% this week'}
+          color="#4F6EF7" icon="eye"
+        />
+        <StatCard
+          label="Total Plays"
+          value={statsLoading ? '—' : totalPlays.toLocaleString()}
+          sub={apiStats ? 'All time' : '+8% this week'}
+          color="#06B6D4" icon="play"
+        />
+        <StatCard
+          label="Leads Captured"
+          value={statsLoading ? '—' : totalLeads.toLocaleString()}
+          sub={`${totalLeads} of ${leadLimit} this month`}
+          color="#1ED8A0" icon="zap"
+        />
+        <StatCard
+          label="Total Videos"
+          value={statsLoading ? '—' : totalVideos.toLocaleString()}
+          sub={`${totalCP} active choice points`}
+          color="#F5A623" icon="branch"
+        />
       </div>
 
       {/* ── Goals ── */}
@@ -319,9 +346,7 @@ export default function Dashboard() {
             const sc = lead.score >= 85 ? '#1ED8A0' : lead.score >= 70 ? '#F5A623' : '#FF6B6B'
             return (
               <div key={li} style={{ background: 'var(--s3)', border: '1px solid var(--b2)', borderRadius: 11, padding: 14, position: 'relative', overflow: 'hidden' }}>
-                {/* color top bar */}
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: lead.color }} />
-
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ width: 32, height: 32, borderRadius: '50%', background: `${lead.color}33`, border: `1.5px solid ${lead.color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: lead.color }}>
@@ -337,19 +362,16 @@ export default function Dashboard() {
                     <div style={{ fontSize: 8, color: 'var(--t3)' }}>Score</div>
                   </div>
                 </div>
-
                 <div style={{ fontSize: 10, color: 'var(--t2)', marginBottom: 6 }}>
                   <span style={{ color: 'var(--t3)' }}>Watched:</span> <strong>{lead.video}</strong> · {lead.watchPct}%
                 </div>
                 <div style={{ fontSize: 10, marginBottom: 8 }}>
                   <span style={{ fontWeight: 600, color: lead.color }}>{lead.signal}</span> · {lead.action}
                 </div>
-
                 <div style={{ background: 'var(--s2)', border: '1px solid var(--b1)', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                   <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--acc)', marginBottom: 3 }}>💡 Suggested Action</div>
                   <div style={{ fontSize: 10, color: 'var(--t2)', lineHeight: 1.5 }}>{lead.suggestion}</div>
                 </div>
-
                 <div style={{ display: 'flex', gap: 5 }}>
                   <button style={{ flex: 1, padding: 6, borderRadius: 7, background: 'var(--acc)', border: 'none', color: '#fff', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>📧 Email</button>
                   <button onClick={e => { e.stopPropagation(); setSmsModal({ name: lead.name, phone: lead.phone, video: lead.video, email: lead.email }) }}
@@ -369,7 +391,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>Weekly Engagement</div>
             <div style={{ display: 'flex', gap: 6 }}>
-              {['7D','30D','90D'].map(l => (
+              {['7D', '30D', '90D'].map(l => (
                 <button key={l} onClick={() => setChartRange(l)}
                   style={{ padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 600, border: `1px solid ${l === chartRange ? 'var(--acc)' : 'var(--b2)'}`, background: l === chartRange ? 'rgba(79,110,247,0.1)' : 'transparent', color: l === chartRange ? 'var(--acc)' : 'var(--t3)', cursor: 'pointer' }}>
                   {l}
@@ -432,24 +454,24 @@ export default function Dashboard() {
           </div>
           {topVideo && (() => {
             const isVert = topVideo.aspectRatio === '9:16'
-            const isSq   = topVideo.aspectRatio === '1:1'
-            const ar      = isVert ? '9/16' : isSq ? '1/1' : '16/9'
+            const isSq = topVideo.aspectRatio === '1:1'
+            const ar = isVert ? '9/16' : isSq ? '1/1' : '16/9'
             return (
-            <div onClick={() => goto('library')} style={{ cursor: 'pointer' }}>
-              <div style={{ width: '100%', aspectRatio: ar, maxWidth: isVert ? 280 : '100%', marginLeft: isVert ? 'auto' : undefined, marginRight: isVert ? 'auto' : undefined, borderRadius: 10, background: topVideo.color || 'linear-gradient(135deg,#1E2540,#0F172A)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, position: 'relative' }}>
-                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.2)', borderRadius: 10 }} />
-                <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill={topVideo.color || '#4F6EF7'}><polygon points="5,3 19,12 5,21"/></svg>
+              <div onClick={() => goto('library')} style={{ cursor: 'pointer' }}>
+                <div style={{ width: '100%', aspectRatio: ar, maxWidth: isVert ? 280 : '100%', marginLeft: isVert ? 'auto' : undefined, marginRight: isVert ? 'auto' : undefined, borderRadius: 10, background: topVideo.color || 'linear-gradient(135deg,#1E2540,#0F172A)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, position: 'relative' }}>
+                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.2)', borderRadius: 10 }} />
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill={topVideo.color || '#4F6EF7'}><polygon points="5,3 19,12 5,21" /></svg>
+                  </div>
+                  <div style={{ position: 'absolute', top: 8, right: 8, background: 'var(--grn)', color: '#071a14', fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 100 }}>#1</div>
                 </div>
-                <div style={{ position: 'absolute', top: 8, right: 8, background: 'var(--grn)', color: '#071a14', fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 100 }}>#1</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)', marginBottom: 6 }}>{topVideo.title}</div>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <div><div style={{ fontSize: 9, color: 'var(--t3)' }}>VIEWS</div><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>{(topVideo.views || 0).toLocaleString()}</div></div>
+                  <div><div style={{ fontSize: 9, color: 'var(--t3)' }}>ENGAGEMENT</div><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--grn)' }}>{topVideo.eng || 0}%</div></div>
+                  <div><div style={{ fontSize: 9, color: 'var(--t3)' }}>DURATION</div><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>{topVideo.dur || '—'}</div></div>
+                </div>
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t1)', marginBottom: 6 }}>{topVideo.title}</div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div><div style={{ fontSize: 9, color: 'var(--t3)' }}>VIEWS</div><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>{(topVideo.views || 0).toLocaleString()}</div></div>
-                <div><div style={{ fontSize: 9, color: 'var(--t3)' }}>ENGAGEMENT</div><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--grn)' }}>{topVideo.eng || 0}%</div></div>
-                <div><div style={{ fontSize: 9, color: 'var(--t3)' }}>DURATION</div><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>{topVideo.dur || '—'}</div></div>
-              </div>
-            </div>
             )
           })()}
         </div>
@@ -463,12 +485,14 @@ export default function Dashboard() {
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
               <div style={{ fontSize: 12, color: 'var(--t2)' }}>Monthly usage</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)' }}>212 / 500</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)' }}>{statsLoading ? '…' : `${totalLeads} / ${leadLimit}`}</div>
             </div>
             <div style={{ height: 6, borderRadius: 3, background: 'var(--s3)', overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: '42%', background: 'linear-gradient(90deg,var(--acc),#A855F7)', borderRadius: 3 }} />
+              <div style={{ height: '100%', width: `${leadPct}%`, background: 'linear-gradient(90deg,var(--acc),#A855F7)', borderRadius: 3 }} />
             </div>
-            <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>288 leads remaining this month</div>
+            <div style={{ fontSize: 10, color: 'var(--t3)', marginTop: 4 }}>
+              {statsLoading ? '…' : `${leadRemain} leads remaining this month`}
+            </div>
           </div>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Top Sources</div>
           {TOP_SOURCES.map(s => (
@@ -525,7 +549,7 @@ export default function Dashboard() {
   )
 }
 
-// ── SMS Modal (matches HTML buildSmsModal) ────────────────────────────────────
+// ── SMS Modal ─────────────────────────────────────────────────────────────────
 function SmsModal({ modal, videos, onClose }) {
   const firstName = modal.name ? modal.name.split(' ')[0] : ''
   const selectedVid = videos.find(v => v.title === modal.video) || videos[0]
@@ -554,7 +578,6 @@ function SmsModal({ modal, videos, onClose }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div onClick={e => e.stopPropagation()} style={{ background: 'var(--s1)', border: '1px solid var(--b2)', borderRadius: 16, width: 400, maxWidth: '90vw', boxShadow: '0 24px 64px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
-        {/* Header */}
         <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--b1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 18 }}>📲</span>
@@ -562,7 +585,6 @@ function SmsModal({ modal, videos, onClose }) {
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--t3)', fontSize: 16, cursor: 'pointer' }}>✕</button>
         </div>
-        {/* Body */}
         <div style={{ padding: 20 }}>
           <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 4 }}>Phone Number</label>
           <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="(555) 555-0000"
