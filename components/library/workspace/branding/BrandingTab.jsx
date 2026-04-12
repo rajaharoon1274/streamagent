@@ -8,7 +8,7 @@ import PlayerPreview from './PlayerPreview'
 export default function BrandingTab({ video: v, b, aspectRatio }) {
   return (
     <div style={{
-      flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      flex: 1, display: 'flex', flexDirection: 'column',
       background: 'var(--bg)',
     }}>
       {/* Preview header */}
@@ -20,7 +20,7 @@ export default function BrandingTab({ video: v, b, aspectRatio }) {
       {/* Player preview */}
       <div style={{
         flex: 1, overflowY: 'auto', display: 'flex', alignItems: 'flex-start',
-        justifyContent: 'center', padding: 24,
+        justifyContent: 'center', padding: 40,
       }}>
         <div style={{ width: '100%', maxWidth: 640 }}>
           <PlayerPreview b={b} aspectRatio={aspectRatio || v?.aspectRatio || '16:9'} />

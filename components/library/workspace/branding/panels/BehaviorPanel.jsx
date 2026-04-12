@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { TogRow } from './helpers'
 
-function BehavCard({ id, icon, title, summary, open, onToggle, children }) {
+function BehavCard({ icon, title, summary, open, onToggle, children }) {
   return (
     <div style={{
       background: 'var(--s3)', border: '1px solid var(--b2)',
@@ -55,7 +55,8 @@ function SelectRow({ label, value, options, onChange }) {
         onChange={e => onChange(e.target.value)}
         style={{
           background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 7,
-          padding: '4px 8px', fontSize: 10, color: 'var(--t1)', fontFamily: 'var(--fn)', cursor: 'pointer',
+          padding: '4px 8px', fontSize: 10, color: 'var(--t1)',
+          fontFamily: 'var(--fn)', cursor: 'pointer',
         }}
       >
         {options.map(o => (
@@ -70,28 +71,25 @@ export default function BehaviorPanel({ b, onChange }) {
   const [open, setOpen] = useState({ start: true, playback: false, other: false })
   const toggle = (id) => setOpen(p => ({ ...p, [id]: !p[id] }))
 
-  const autoplayLabels = {
-    'off': 'Off', 'silent-preview': 'Silent Preview', 'always': 'Always',
-    'scroll': 'When in View', 'desktop': 'Desktop Only', 'returning': 'Returning Visitors',
-  }
-  const endLabels = {
-    'pause-last': 'Pause last frame', 'loop': 'Loop',
-    'show-thumbnail': 'Show Thumbnail', 'show-cta': 'CTA Overlay',
+  // Autoplay MUST set muted=true (browser policy)
+  function handleAutoplayToggle(isOn) {
+    onChange('autoplay', isOn)
+    if (isOn) onChange('muted', true)
   }
 
   const startSummary = [
-    autoplayLabels[b.autoplayMode || 'off'] !== 'Off' ? autoplayLabels[b.autoplayMode] : null,
-    b.mutedStart ? 'Muted' : null,
-    'End: ' + (endLabels[b.endAction] || 'Pause'),
+    b.autoplay ? 'Autoplay ON (muted)' : 'Autoplay Off',
+    b.mutedStart ? 'Muted Start' : null,
+    b.endAction ? 'End: ' + b.endAction : null,
     b.resumePlayback ? 'Resume' : null,
   ].filter(Boolean).join(' · ')
 
   const pbSummary = [
-    b.showPlaybar !== false ? 'Playbar' : null,
-    b.captions ? 'CC' : null,
+    b.showProgress !== false ? 'Progress' : null,
+    b.showTime !== false ? 'Time' : null,
     b.showVolume !== false ? 'Vol' : null,
-    b.showSpeed !== false ? 'Speed' : null,
     b.showFullscreen !== false ? 'FS' : null,
+    b.captions ? 'CC' : null,
     b.chapters ? 'Chapters' : null,
   ].filter(Boolean).join(' · ')
 
@@ -103,83 +101,170 @@ export default function BehaviorPanel({ b, onChange }) {
 
   return (
     <>
-      {/* ── Start / End ─────────────────────── */}
-      <BehavCard id="start" icon="▶️" title="Start / End" summary={startSummary}
+      {/* ── Start / End ���──────────────────── */}
+      <BehavCard
+        icon="▶️" title="Start / End" summary={startSummary}
         open={open.start} onToggle={() => toggle('start')}
       >
-        <SelectRow
+        {/* Autoplay toggle — enforces muted */}
+        <TogRow
+          value={b.autoplay === true}
           label="Autoplay"
-          value={b.autoplayMode || 'off'}
-          options={[
-            { v: 'off', l: 'Off' },
-            { v: 'silent-preview', l: 'Silent Preview Loop' },
-            { v: 'always', l: 'Always' },
-            { v: 'scroll', l: 'When in View' },
-            { v: 'desktop', l: 'Desktop Only' },
-            { v: 'returning', l: 'Returning Visitors' },
-          ]}
-          onChange={v => {
-            onChange('autoplayMode', v)
-            onChange('autoplay', v !== 'off')
-          }}
+          desc="Auto-starts (muted — browser requirement)"
+          onChange={handleAutoplayToggle}
         />
-        <TogRow value={b.mutedStart} label="Start Muted" desc="Begin with audio off"
-          onChange={v => onChange('mutedStart', v)} />
+        {b.autoplay && (
+          <div style={{
+            fontSize: 9, color: '#F5A623',
+            background: 'rgba(245,166,35,0.08)',
+            border: '1px solid rgba(245,166,35,0.2)',
+            borderRadius: 6, padding: '5px 8px',
+            marginBottom: 6, lineHeight: 1.5,
+          }}>
+            ⚠ Autoplay requires muted audio (browser policy). Muted is automatically enabled.
+          </div>
+        )}
+        <TogRow
+          value={b.muted === true}
+          label="Muted"
+          desc="Start with audio muted"
+          onChange={v => onChange('muted', v)}
+        />
+        <TogRow
+          value={b.mutedStart === true}
+          label="Start Muted"
+          desc="Begin with audio off"
+          onChange={v => onChange('mutedStart', v)}
+        />
         <SelectRow
           label="End Behavior"
           value={b.endAction || 'pause-last'}
           options={[
-            { v: 'pause-last',     l: 'Pause last frame' },
-            { v: 'loop',           l: 'Loop' },
+            { v: 'pause-last', l: 'Pause last frame' },
+            { v: 'loop', l: 'Loop' },
             { v: 'show-thumbnail', l: 'Show Thumbnail' },
-            { v: 'show-cta',       l: 'CTA Overlay' },
+            { v: 'show-cta', l: 'CTA Overlay' },
           ]}
           onChange={v => onChange('endAction', v)}
         />
-        <TogRow value={b.resumePlayback} label="Resume Playback" desc="Remember position"
-          onChange={v => onChange('resumePlayback', v)} />
+        <TogRow
+          value={b.resumePlayback === true}
+          label="Resume Playback"
+          desc="Remember viewer position"
+          onChange={v => onChange('resumePlayback', v)}
+        />
       </BehavCard>
 
-      {/* ── Playback Controls ──────────────── */}
-      <BehavCard id="playback" icon="🎛️" title="Playback Controls" summary={pbSummary}
+      {/* ── Playback Controls ─────────────── */}
+      <BehavCard
+        icon="🎛️" title="Playback Controls" summary={pbSummary}
         open={open.playback} onToggle={() => toggle('playback')}
       >
-        <TogRow value={b.showPlaybar !== false} label="Playbar" desc="Scrubber / progress bar"
-          onChange={v => onChange('showPlaybar', v)} />
-        <TogRow value={b.captions} label="Captions" desc="CC button on player"
-          onChange={v => onChange('captions', v)} />
-        {b.captions && (
-          <TogRow value={b.captionsDefault} label="On by Default" desc="Show without clicking CC"
-            onChange={v => onChange('captionsDefault', v)} />
+        <TogRow
+          value={b.showProgress !== false}
+          label="Progress Bar"
+          desc="Scrubber / seek bar"
+          onChange={v => onChange('showProgress', v)}
+        />
+        <TogRow
+          value={b.showTime !== false}
+          label="Time Display"
+          desc="Current / total time"
+          onChange={v => onChange('showTime', v)}
+        />
+        <TogRow
+          value={b.showShareButton !== false}
+          label="Share Button"
+          desc="Share icon in controls"
+          onChange={v => onChange('showShareButton', v)}
+        />
+        <TogRow
+          value={b.captions !== false}
+          label="Captions"
+          desc="CC button on player"
+          onChange={v => onChange('captions', v)}
+        />
+        {b.captions !== false && (
+          <TogRow
+            value={b.captionsDefault === true}
+            label="Captions On by Default"
+            desc="Show without clicking CC"
+            onChange={v => onChange('captionsDefault', v)}
+          />
         )}
-        <TogRow value={b.showVolume !== false} label="Volume" desc="Volume control"
-          onChange={v => onChange('showVolume', v)} />
-        <TogRow value={b.showSettings !== false} label="Settings" desc="Settings gear icon"
-          onChange={v => onChange('showSettings', v)} />
-        <TogRow value={b.showSpeed !== false} label="Playback Speed" desc="Speed selector"
-          onChange={v => onChange('showSpeed', v)} />
-        <TogRow value={b.showQuality !== false} label="Quality" desc="Quality selector"
-          onChange={v => onChange('showQuality', v)} />
-        <TogRow value={b.showFullscreen !== false} label="Fullscreen" desc="Fullscreen button"
-          onChange={v => onChange('showFullscreen', v)} />
-        <TogRow value={b.chapters} label="Chapter Markers" desc="Dots on progress bar"
-          onChange={v => onChange('chapters', v)} />
+        <TogRow
+          value={b.showVolume !== false}
+          label="Volume"
+          desc="Volume control"
+          onChange={v => onChange('showVolume', v)}
+        />
+        <TogRow
+          value={b.showSettings !== false}
+          label="Settings"
+          desc="Settings gear icon"
+          onChange={v => onChange('showSettings', v)}
+        />
+        <TogRow
+          value={b.showSpeed !== false}
+          label="Playback Speed"
+          desc="Speed selector"
+          onChange={v => onChange('showSpeed', v)}
+        />
+        <TogRow
+          value={b.showQuality !== false}
+          label="Quality"
+          desc="Quality selector"
+          onChange={v => onChange('showQuality', v)}
+        />
+        <TogRow
+          value={b.showFullscreen !== false}
+          label="Fullscreen"
+          desc="Fullscreen button"
+          onChange={v => onChange('showFullscreen', v)}
+        />
+        <TogRow
+          value={b.chapters !== false}
+          label="Chapter Markers"
+          desc="Dots on progress bar"
+          onChange={v => onChange('chapters', v)}
+        />
       </BehavCard>
 
       {/* ── Other ─────────────────────────── */}
-      <BehavCard id="other" icon="⚙️" title="Other" summary={otherSummary}
+      <BehavCard
+        icon="⚙️" title="Other" summary={otherSummary}
         open={open.other} onToggle={() => toggle('other')}
       >
-        <TogRow value={b.ctaReplayPrevention !== false} label="Smart Replay"
-          desc="Skip gates for returning leads" onChange={v => onChange('ctaReplayPrevention', v)} />
-        <TogRow value={b.autoPersonalize} label="Auto-Personalize"
-          desc="Add viewer name to CTAs & headlines" onChange={v => onChange('autoPersonalize', v)} />
-        <TogRow value={b.keyboardShortcuts !== false} label="Keyboard Shortcuts"
-          desc="Space, arrows, M for mute" onChange={v => onChange('keyboardShortcuts', v)} />
-        <TogRow value={b.mobileFF} label="Mobile Skip" desc="Fast-forward on mobile"
-          onChange={v => onChange('mobileFF', v)} />
-        <TogRow value={b.badge !== false} label="StreamAgent Badge"
-          desc="Powered by StreamAgent" onChange={v => onChange('badge', v)} />
+        <TogRow
+          value={b.ctaReplayPrevention !== false}
+          label="Smart Replay"
+          desc="Skip gates for returning leads"
+          onChange={v => onChange('ctaReplayPrevention', v)}
+        />
+        <TogRow
+          value={b.autoPersonalize === true}
+          label="Auto-Personalize"
+          desc="Add viewer name to CTAs & headlines"
+          onChange={v => onChange('autoPersonalize', v)}
+        />
+        <TogRow
+          value={b.keyboardShortcuts !== false}
+          label="Keyboard Shortcuts"
+          desc="Space, arrows, M for mute"
+          onChange={v => onChange('keyboardShortcuts', v)}
+        />
+        <TogRow
+          value={b.mobileFF === true}
+          label="Mobile Skip"
+          desc="Fast-forward on mobile"
+          onChange={v => onChange('mobileFF', v)}
+        />
+        <TogRow
+          value={b.badge !== false}
+          label="StreamAgent Badge"
+          desc="Show 'Powered by StreamAgent' on player"
+          onChange={v => onChange('badge', v)}
+        />
       </BehavCard>
     </>
   )
