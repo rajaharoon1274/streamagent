@@ -1,21 +1,29 @@
 'use client'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useApp } from '@/context/AppContext'
+import { useAuth } from '@/context/AuthContext'
 import ToggleSwitch from '@/components/ui/ToggleSwitch'
 import toast from 'react-hot-toast'
+import { createBrowserClient } from '@supabase/ssr'
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+)
 
 const TABS = ['Account', 'Lead Routing', 'Video Import', 'API Keys', 'Plan']
 
 /* ───────── shared flash-button helper ───────── */
-function FlashButton({ onClick, idleLabel, doneLabel, idleStyle, doneStyle }) {
+function FlashButton({ onClick, idleLabel, doneLabel, idleStyle, doneStyle, disabled }) {
   const [done, setDone] = useState(false)
   function handle() {
+    if (disabled) return
     if (onClick) onClick()
     setDone(true)
     setTimeout(() => setDone(false), 1800)
   }
   return (
-    <button onClick={handle} style={done ? doneStyle : idleStyle}>
+    <button onClick={handle} style={done ? doneStyle : idleStyle} disabled={disabled}>
       {done ? doneLabel : idleLabel}
     </button>
   )
@@ -26,11 +34,135 @@ function FlashButton({ onClick, idleLabel, doneLabel, idleStyle, doneStyle }) {
    ═══════════════════════════════════════════════════ */
 function AccountTab() {
   const { state, set } = useApp()
-  const acct = state.account || { firstName: 'Justin', lastName: 'D.', email: 'justin@techdrivenagent.com', company: 'Tech Driven Agent', phone: '(310) 555-1234', timezone: 'America/Los_Angeles' }
-  const [profile, setProfile] = useState({ ...acct })
-  const [twoFA, setTwoFA] = useState(false)
+  const { user } = useAuth()
+  const fileRef = useRef(null)
+
+  // AppContext.account is already populated with real DB data by AuthContext
+  // before this component mounts — no extra fetch needed.
+  const acct = state.account || {}
+  const [profile, setProfile] = useState({
+    firstName: acct.firstName || '',
+    lastName: acct.lastName || '',
+    email: acct.email || user?.email || '',
+    company: acct.company || '',
+    phone: acct.phone || '',
+    timezone: acct.timezone || 'UTC',
+    avatar_url: acct.avatar_url || acct.avatarUrl || '',
+  })
+  const [pw, setPw] = useState({ current: '', newPw: '', confirm: '' })
+  const [twoFA, setTwoFA] = useState(acct.twoFA || false)
+  const [saving, setSaving] = useState({})
 
   function upd(k, v) { setProfile(p => ({ ...p, [k]: v })) }
+  function setSav(k, v) { setSaving(s => ({ ...s, [k]: v })) }
+
+  // Save profile → PATCH /api/account
+  async function saveProfile() {
+    setSav('profile', true)
+    try {
+      const res = await fetch('/api/account', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: profile.firstName,
+          last_name: profile.lastName,
+          company: profile.company,
+          phone: profile.phone,
+          timezone: profile.timezone,
+          avatar_url: profile.avatar_url,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Save failed')
+      // Sync back to AppContext so sidebar name/avatar updates instantly
+      set({
+        account: {
+          ...state.account,
+          ...profile,
+          avatarUrl: profile.avatar_url,
+        },
+      })
+      toast.success('Profile saved!')
+    } catch (e) {
+      toast.error(e.message || 'Failed to save profile')
+    } finally {
+      setSav('profile', false)
+    }
+  }
+
+  // Change password → PATCH /api/account { newPassword }
+  async function changePassword() {
+    if (!pw.newPw || pw.newPw.length < 8) {
+      toast.error('Password must be at least 8 characters'); return
+    }
+    if (pw.newPw !== pw.confirm) {
+      toast.error('Passwords do not match'); return
+    }
+    setSav('password', true)
+    try {
+      const res = await fetch('/api/account', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword: pw.newPw }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to update password')
+      toast.success('Password updated!')
+      setPw({ current: '', newPw: '', confirm: '' })
+    } catch (e) {
+      toast.error(e.message || 'Failed to update password')
+    } finally {
+      setSav('password', false)
+    }
+  }
+
+  // Avatar upload → Supabase Storage → PATCH /api/account { avatar_url }
+  async function handleAvatar(file) {
+    if (!file) return
+    setSav('avatar', true)
+    try {
+      const ext = file.name.split('.').pop().toLowerCase()
+      // Path is just filename — bucket name "avatars" is already the prefix
+      const path = `${Date.now()}.${ext}`
+      const { error: upErr } = await supabase.storage
+        .from('avatars').upload(path, file, { upsert: true })
+      if (upErr) throw new Error(upErr.message)
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path)
+      const avatarUrl = urlData.publicUrl
+      upd('avatar_url', avatarUrl)
+      await fetch('/api/account', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ avatar_url: avatarUrl }),
+      })
+      // Sync sidebar avatar immediately
+      set({ account: { ...state.account, avatarUrl, avatar_url: avatarUrl } })
+      toast.success('Photo updated!')
+    } catch (e) {
+      toast.error(e.message || 'Upload failed')
+    } finally {
+      setSav('avatar', false)
+    }
+  }
+
+  // Delete account → DELETE /api/account
+  async function deleteAccount() {
+    const confirmed = window.confirm(
+      'PERMANENTLY delete your account, workspace, videos, and all data?\n\nThis cannot be undone.'
+    )
+    if (!confirmed) return
+    setSav('delete', true)
+    try {
+      const res = await fetch('/api/account', { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Delete failed')
+      toast.success('Account deleted')
+      window.location.href = '/login'
+    } catch (e) {
+      toast.error(e.message || 'Delete failed')
+      setSav('delete', false)
+    }
+  }
 
   const initials = ((profile.firstName || '')[0] || '') + ((profile.lastName || '')[0] || '')
 
@@ -42,16 +174,33 @@ function AccountTab() {
 
         {/* Avatar row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 18 }}>
-          <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg,#06B6D4,#4F6EF7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800, color: '#fff', flexShrink: 0 }}>
-            {initials.toUpperCase()}
+          <div
+            onClick={() => fileRef.current?.click()}
+            style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg,#06B6D4,#4F6EF7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800, color: '#fff', flexShrink: 0, cursor: 'pointer', overflow: 'hidden', position: 'relative' }}
+          >
+            {profile.avatar_url
+              ? <img src={profile.avatar_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="avatar" />
+              : <span>{initials.toUpperCase() || '👤'}</span>
+            }
+            {saving.avatar && (
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', animation: 'st-spin 0.8s linear infinite' }} />
+              </div>
+            )}
           </div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--t1)' }}>{profile.firstName} {profile.lastName}</div>
             <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 2 }}>{profile.email}</div>
             <div style={{ marginTop: 8 }}>
-              <button style={{ padding: '5px 12px', borderRadius: 7, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>Upload Photo</button>
+              <button
+                onClick={() => fileRef.current?.click()}
+                style={{ padding: '5px 12px', borderRadius: 7, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Upload Photo
+              </button>
             </div>
           </div>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleAvatar(e.target.files[0])} />
         </div>
 
         {/* Name row */}
@@ -60,10 +209,10 @@ function AccountTab() {
           <div><label className="prop-lbl">Last Name</label><input className="prop-inp" value={profile.lastName || ''} onChange={e => upd('lastName', e.target.value)} style={{ marginTop: 4 }} /></div>
         </div>
 
-        {/* Email */}
+        {/* Email – read-only */}
         <div style={{ marginBottom: 12 }}>
           <label className="prop-lbl">Email Address</label>
-          <input className="prop-inp" type="email" value={profile.email || ''} onChange={e => upd('email', e.target.value)} style={{ marginTop: 4 }} />
+          <input className="prop-inp" type="email" value={profile.email || ''} readOnly style={{ marginTop: 4, opacity: 0.6, cursor: 'not-allowed' }} />
         </div>
 
         {/* Company + Phone */}
@@ -75,7 +224,7 @@ function AccountTab() {
         {/* Timezone */}
         <div style={{ marginBottom: 16 }}>
           <label className="prop-lbl">Timezone</label>
-          <select className="prop-inp" value={profile.timezone || 'America/Los_Angeles'} onChange={e => upd('timezone', e.target.value)} style={{ marginTop: 4 }}>
+          <select className="prop-inp" value={profile.timezone || 'UTC'} onChange={e => upd('timezone', e.target.value)} style={{ marginTop: 4 }}>
             {[
               ['America/New_York', 'Eastern (ET)'],
               ['America/Chicago', 'Central (CT)'],
@@ -92,10 +241,11 @@ function AccountTab() {
         </div>
 
         <FlashButton
-          onClick={() => set({ account: profile })}
-          idleLabel="Save Profile"
+          onClick={saveProfile}
+          disabled={saving.profile}
+          idleLabel={saving.profile ? 'Saving…' : 'Save Profile'}
           doneLabel="✓ Saved"
-          idleStyle={{ padding: '9px 20px', borderRadius: 9, background: 'var(--acc)', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}
+          idleStyle={{ padding: '9px 20px', borderRadius: 9, background: saving.profile ? 'var(--s3)' : 'var(--acc)', color: saving.profile ? 'var(--t3)' : '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: saving.profile ? 'not-allowed' : 'pointer' }}
           doneStyle={{ padding: '9px 20px', borderRadius: 9, background: 'var(--grn)', color: '#071a14', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}
         />
       </div>
@@ -106,17 +256,19 @@ function AccountTab() {
 
         <div style={{ marginBottom: 14 }}>
           <label className="prop-lbl">Current Password</label>
-          <input className="prop-inp" type="password" placeholder="Enter current password" style={{ marginTop: 4 }} />
+          <input className="prop-inp" type="password" placeholder="Enter current password" value={pw.current} onChange={e => setPw(p => ({ ...p, current: e.target.value }))} style={{ marginTop: 4 }} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-          <div><label className="prop-lbl">New Password</label><input className="prop-inp" type="password" placeholder="Min 8 characters" style={{ marginTop: 4 }} /></div>
-          <div><label className="prop-lbl">Confirm Password</label><input className="prop-inp" type="password" placeholder="Re-enter new password" style={{ marginTop: 4 }} /></div>
+          <div><label className="prop-lbl">New Password</label><input className="prop-inp" type="password" placeholder="Min 8 characters" value={pw.newPw} onChange={e => setPw(p => ({ ...p, newPw: e.target.value }))} style={{ marginTop: 4 }} /></div>
+          <div><label className="prop-lbl">Confirm Password</label><input className="prop-inp" type="password" placeholder="Re-enter new password" value={pw.confirm} onChange={e => setPw(p => ({ ...p, confirm: e.target.value }))} style={{ marginTop: 4 }} /></div>
         </div>
 
         <FlashButton
-          idleLabel="Update Password"
+          onClick={changePassword}
+          disabled={saving.password}
+          idleLabel={saving.password ? 'Updating…' : 'Update Password'}
           doneLabel="✓ Password Updated"
-          idleStyle={{ padding: '8px 16px', borderRadius: 9, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+          idleStyle={{ padding: '8px 16px', borderRadius: 9, background: 'var(--s3)', border: '1px solid var(--b2)', color: 'var(--t2)', fontSize: 12, fontWeight: 600, cursor: saving.password ? 'not-allowed' : 'pointer' }}
           doneStyle={{ padding: '8px 16px', borderRadius: 9, background: 'var(--grn)', color: '#071a14', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}
         />
 
@@ -176,9 +328,17 @@ function AccountTab() {
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)' }}>Delete Account</div>
             <div style={{ fontSize: 10, color: 'var(--t3)' }}>Permanently delete your account and all data</div>
           </div>
-          <button style={{ padding: '6px 14px', borderRadius: 8, background: 'rgba(255,107,107,0.1)', border: '1px solid rgba(255,107,107,0.25)', color: 'var(--red)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Delete</button>
+          <button
+            onClick={deleteAccount}
+            disabled={saving.delete}
+            style={{ padding: '6px 14px', borderRadius: 8, background: 'rgba(255,107,107,0.1)', border: '1px solid rgba(255,107,107,0.25)', color: 'var(--red)', fontSize: 11, fontWeight: 600, cursor: saving.delete ? 'not-allowed' : 'pointer' }}
+          >
+            {saving.delete ? 'Deleting…' : 'Delete'}
+          </button>
         </div>
       </div>
+
+      <style>{`@keyframes st-spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 }
@@ -187,26 +347,20 @@ function AccountTab() {
    LEAD ROUTING TAB
    ═══════════════════════════════════════════════════ */
 function LeadRoutingTab() {
-  const { goto } = useApp() || {}
-
+  useApp()
   return (
     <div>
-      {/* Info banner */}
       <div style={{ background: 'rgba(79,110,247,0.07)', border: '1px solid rgba(79,110,247,0.2)', borderRadius: 12, padding: '13px 16px', marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 11 }}>
         <div style={{ fontSize: 20 }}>⚡</div>
         <div style={{ fontSize: 12, color: 'var(--t2)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--t1)' }}>Lead Routing</strong> controls where captured leads are sent when a gate fires. StreamAgent CRM is always on. Toggle additional destinations to sync leads to your connected platforms in real time.
         </div>
       </div>
-
-      {/* Default Destinations card */}
       <div style={{ background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 14, overflow: 'hidden', marginBottom: 16 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--b1)' }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>Default Destinations</div>
           <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 2 }}>Applied to all gates unless overridden per-element</div>
         </div>
-
-        {/* StreamAgent CRM row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 18px', borderBottom: '1px solid var(--b1)' }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(79,110,247,0.12)', border: '1px solid rgba(79,110,247,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>👥</div>
           <div style={{ flex: 1 }}>
@@ -215,8 +369,6 @@ function LeadRoutingTab() {
           </div>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--grn)', background: 'rgba(30,216,160,0.1)', padding: '4px 12px', borderRadius: 100, border: '1px solid rgba(30,216,160,0.2)' }}>✓ Always On</div>
         </div>
-
-        {/* No integrations connected */}
         <div style={{ padding: '24px 18px', textAlign: 'center' }}>
           <div style={{ fontSize: 24, marginBottom: 10 }}>🔒</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t2)', marginBottom: 6 }}>No integrations connected yet</div>
@@ -262,20 +414,18 @@ function VideoImportTab() {
             <div className="sa-h3">Vimeo</div>
             <div className="sa-sub">{vimeoConn ? 'Vimeo Account' : 'Import videos from your Vimeo library via OAuth'}</div>
           </div>
-          {vimeoConn ? (
-            <button onClick={disconnectVimeo} style={{ padding: '6px 13px', borderRadius: 8, background: 'rgba(255,107,107,0.1)', border: '1px solid rgba(255,107,107,0.2)', color: 'var(--red)', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Disconnect</button>
-          ) : (
-            <button onClick={connectVimeo} style={{ padding: '6px 14px', borderRadius: 8, background: '#1AB7EA', color: '#fff', fontSize: 11, fontWeight: 800, border: 'none', cursor: 'pointer' }}>Connect</button>
-          )}
+          {vimeoConn
+            ? <button onClick={disconnectVimeo} style={{ padding: '6px 13px', borderRadius: 8, background: 'rgba(255,107,107,0.1)', border: '1px solid rgba(255,107,107,0.2)', color: 'var(--red)', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Disconnect</button>
+            : <button onClick={connectVimeo} style={{ padding: '6px 14px', borderRadius: 8, background: '#1AB7EA', color: '#fff', fontSize: 11, fontWeight: 800, border: 'none', cursor: 'pointer' }}>Connect</button>
+          }
         </div>
-        {vimeoConn ? (
-          <div style={{ marginTop: 11, padding: '9px 12px', background: 'rgba(30,216,160,0.06)', borderRadius: 9, border: '1px solid rgba(30,216,160,0.15)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        {vimeoConn
+          ? <div style={{ marginTop: 11, padding: '9px 12px', background: 'rgba(30,216,160,0.06)', borderRadius: 9, border: '1px solid rgba(30,216,160,0.15)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--grn)' }} />
             <span style={{ fontSize: 11, color: 'var(--grn)', fontWeight: 600 }}>Active — leads and events syncing</span>
           </div>
-        ) : (
-          <div style={{ marginTop: 11, fontSize: 10, color: 'var(--t3)', lineHeight: 1.5 }}>🔒 Uses OAuth — you'll be redirected to Vimeo to approve access. Vimeo Basic, Plus, Pro, Business and Premium supported.</div>
-        )}
+          : <div style={{ marginTop: 11, fontSize: 10, color: 'var(--t3)', lineHeight: 1.5 }}>🔒 Uses OAuth — you'll be redirected to Vimeo to approve access. Vimeo Basic, Plus, Pro, Business and Premium supported.</div>
+        }
       </div>
 
       {/* Wistia */}
@@ -310,7 +460,7 @@ function VideoImportTab() {
    ═══════════════════════════════════════════════════ */
 const API_KEYS_DATA = [
   { name: 'Production', key: '••••••••••••••••••••••••••••••••••••••', created: 'Jan 3 2026', lastUsed: '2 hours ago', color: '#1ED8A0' },
-  { name: 'Embed SDK',  key: '••••••••••••••••••••••••••••••••••••••', created: 'Jan 3 2026', lastUsed: '5 min ago',   color: '#4F6EF7' },
+  { name: 'Embed SDK', key: '••••••••••••••••••••••••••••••••••••••', created: 'Jan 3 2026', lastUsed: '5 min ago', color: '#4F6EF7' },
 ]
 
 function APIKeysTab() {
@@ -322,7 +472,6 @@ function APIKeysTab() {
           Your StreamAgent API keys let you connect external tools and your embed SDK. Treat these like passwords — never share them publicly.
         </div>
       </div>
-
       <div style={{ background: 'var(--s2)', border: '1px solid var(--b2)', borderRadius: 14, overflow: 'hidden', marginBottom: 14 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--b1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="sa-h3">API Keys</span>
@@ -396,7 +545,6 @@ const PLANS = [
 function PlanTab() {
   return (
     <div style={{ maxWidth: 680 }}>
-      {/* Current plan */}
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>Current Plan</div>
       <div style={{ background: 'rgba(6,182,212,0.08)', border: '1.5px solid rgba(6,182,212,0.25)', borderRadius: 14, padding: '16px 18px', marginBottom: 22, display: 'flex', alignItems: 'center', gap: 14 }}>
         <div style={{ flex: 1 }}>
@@ -411,8 +559,6 @@ function PlanTab() {
           Upgrade Plan
         </button>
       </div>
-
-      {/* All plans */}
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 14 }}>All Plans</div>
       <div className="plan-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
         {PLANS.map(plan => (
@@ -431,7 +577,7 @@ function PlanTab() {
             <div style={{ padding: '12px 16px 16px' }}>
               {plan.features.map((f, i) => {
                 const label = typeof f === 'string' ? f : f.label
-                const yes   = typeof f === 'string' ? true : f.yes
+                const yes = typeof f === 'string' ? true : f.yes
                 return (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
                     <div style={{ width: 16, height: 16, borderRadius: '50%', background: yes ? plan.color + '22' : 'rgba(255,255,255,0.03)', border: `1px solid ${yes ? plan.color + '44' : 'rgba(255,255,255,0.07)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -444,15 +590,10 @@ function PlanTab() {
                   </div>
                 )
               })}
-              {plan.current ? (
-                <div style={{ width: '100%', padding: 9, borderRadius: 10, background: plan.color + '18', border: `1px solid ${plan.color}33`, color: plan.color, fontSize: 12, fontWeight: 700, textAlign: 'center', marginTop: 8 }}>
-                  ✓ Your current plan
-                </div>
-              ) : (
-                <button style={{ width: '100%', padding: 9, borderRadius: 10, background: plan.color, color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer', marginTop: 8 }}>
-                  Upgrade to {plan.name}
-                </button>
-              )}
+              {plan.current
+                ? <div style={{ width: '100%', padding: 9, borderRadius: 10, background: plan.color + '18', border: `1px solid ${plan.color}33`, color: plan.color, fontSize: 12, fontWeight: 700, textAlign: 'center', marginTop: 8 }}>✓ Your current plan</div>
+                : <button style={{ width: '100%', padding: 9, borderRadius: 10, background: plan.color, color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer', marginTop: 8 }}>Upgrade to {plan.name}</button>
+              }
             </div>
           </div>
         ))}
@@ -470,7 +611,6 @@ export default function Settings() {
 
   return (
     <div style={{ padding: '22px', maxWidth: 680, animation: 'fadeIn 0.18s ease' }}>
-      {/* Tab bar */}
       <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--b1)', overflowX: 'auto' }}>
         {TABS.map(t => (
           <button key={t} onClick={() => set({ settingsTab: t })} style={{
@@ -484,11 +624,11 @@ export default function Settings() {
         ))}
       </div>
 
-      {activeTab === 'Account'      && <AccountTab />}
+      {activeTab === 'Account' && <AccountTab />}
       {activeTab === 'Lead Routing' && <LeadRoutingTab />}
       {activeTab === 'Video Import' && <VideoImportTab />}
-      {activeTab === 'API Keys'     && <APIKeysTab />}
-      {activeTab === 'Plan'         && <PlanTab />}
+      {activeTab === 'API Keys' && <APIKeysTab />}
+      {activeTab === 'Plan' && <PlanTab />}
     </div>
   )
 }

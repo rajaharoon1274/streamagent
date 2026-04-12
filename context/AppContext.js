@@ -21,11 +21,11 @@ const initialState = {
 
   // ── Account ────────────────────────────────────────────────────────────────
   account: {
-    firstName: 'Justin',
-    lastName: 'D.',
-    email: 'justin@techdrivenagent.com',
-    company: 'Tech Driven Agent',
-    phone: '(310) 555-1234',
+    firstName: '',   // ← was 'Justin'
+    lastName: '',    // ← was 'D.'
+    email: '',       // ← was 'justin@techdrivenagent.com'
+    company: '',     // ← was 'Tech Driven Agent'
+    phone: '',       // ← was '(310) 555-1234'
     timezone: 'America/Los_Angeles',
     avatarUrl: '',
     twoFA: false,
@@ -229,9 +229,9 @@ const initialState = {
 
   // ── Goals (Dashboard) ──────────────────────────────────────────────────────
   dashGoals: [
-    { id: 'g1', type: 'leads',      label: 'Leads Captured', target: 500,   current: 212,  period: 'month', icon: '⚡', color: '#1ED8A0' },
-    { id: 'g2', type: 'views',      label: 'Video Views',    target: 10000, current: 6847, period: 'month', icon: '👁', color: '#4F6EF7' },
-    { id: 'g3', type: 'completion', label: 'Avg Watch Depth',target: 70,    current: 58,   period: 'month', icon: '🎯', color: '#F5A623', unit: '%' },
+    { id: 'g1', type: 'leads', label: 'Leads Captured', target: 500, current: 212, period: 'month', icon: '⚡', color: '#1ED8A0' },
+    { id: 'g2', type: 'views', label: 'Video Views', target: 10000, current: 6847, period: 'month', icon: '👁', color: '#4F6EF7' },
+    { id: 'g3', type: 'completion', label: 'Avg Watch Depth', target: 70, current: 58, period: 'month', icon: '🎯', color: '#F5A623', unit: '%' },
   ],
   dashGoalModal: false,
 
@@ -288,7 +288,7 @@ export function AppProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' })
-    } catch {}
+    } catch { }
     setState(prev => ({
       ...prev,
       isLoggedIn: false,

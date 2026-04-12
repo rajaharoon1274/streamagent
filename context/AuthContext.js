@@ -6,8 +6,6 @@ import { useRouter } from 'next/navigation'
 import { useApp } from '@/context/AppContext'
 
 const AuthContext = createContext(null)
-
-// ✅ Move outside component — called once at module load
 const supabase = createClient()
 
 export function AuthProvider({ children }) {
@@ -18,8 +16,6 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  // ✅ removed: const supabase = createClient() from here
-
   async function fetchUserData(userId) {
     const [profileRes, workspaceRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).single(),
@@ -28,6 +24,7 @@ export function AuthProvider({ children }) {
     if (profileRes.data) {
       const p = profileRes.data
       setProfile(p)
+      // Sync real profile into AppContext — this is the single source of truth
       setApp({
         account: {
           firstName: p.first_name || '',
@@ -35,9 +32,10 @@ export function AuthProvider({ children }) {
           email: p.email || '',
           company: p.company || '',
           phone: p.phone || '',
-          timezone: p.timezone || 'America/Los_Angeles',
+          timezone: p.timezone || 'UTC',
           avatarUrl: p.avatar_url || '',
-          twoFA: p.two_fa_enabled || false,
+          avatar_url: p.avatar_url || '',   // keep both keys in sync
+          twoFA: p.two_fa || false,
         },
       })
     }
@@ -48,9 +46,11 @@ export function AuthProvider({ children }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user)
-        fetchUserData(session.user.id)
+        // ← Wait for profile BEFORE revealing the UI — no more flash of stale data
+        fetchUserData(session.user.id).finally(() => setLoading(false))
+      } else {
+        setLoading(false)
       }
-      setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -69,7 +69,7 @@ export function AuthProvider({ children }) {
     )
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -79,6 +79,32 @@ export function AuthProvider({ children }) {
     setWorkspace(null)
     router.push('/login')
   }, [router])
+
+  // Block the entire app from rendering until the session + profile are resolved.
+  // This is what eliminates the "Justin D." flash — the UI never renders with stale data.
+  if (loading) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0,
+        background: 'var(--bg, #0B0F1A)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 9999,
+      }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+            <polygon points="5,3 19,12 5,21" fill="#4F6EF7" opacity="0.9" />
+          </svg>
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%',
+            border: '2px solid rgba(79,110,247,0.2)',
+            borderTop: '2px solid #4F6EF7',
+            animation: 'auth-spin 0.7s linear infinite',
+          }} />
+          <style>{`@keyframes auth-spin { to { transform: rotate(360deg) } }`}</style>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <AuthContext.Provider value={{ user, profile, workspace, loading, logout, supabase }}>
