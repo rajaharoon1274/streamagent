@@ -2,7 +2,6 @@ import { requireAuth } from '@/lib/auth'
 import { deleteCloudflareVideo } from '@/lib/cloudflare'
 import { NextResponse } from 'next/server'
 
-// Helper: verify the video belongs to the authenticated user's workspace.
 async function getOwnedVideo(supabase, videoId, userId) {
   const { data: ws } = await supabase
     .from('workspaces').select('id').eq('owner_id', userId).single()
@@ -26,7 +25,6 @@ export async function GET(request, { params }) {
   if (!video) {
     return NextResponse.json({ error: 'Video not found' }, { status: 404 })
   }
-
   return NextResponse.json(video)
 }
 
@@ -55,8 +53,12 @@ export async function PATCH(request, { params }) {
     if (body[key] !== undefined) updates[key] = body[key]
   }
 
-  
   if (body.lp !== undefined) updates.landing_page = body.lp
+
+  // When branding contains autoplay:true, enforce muted=true
+  if (updates.branding && updates.branding.autoplay === true) {
+    updates.branding.muted = true
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
@@ -94,9 +96,6 @@ export async function DELETE(request, { params }) {
     return NextResponse.json({ error: 'Video not found' }, { status: 404 })
   }
 
-  // 1. Only delete from Cloudflare if no other DB row shares this stream_uid.
-  //    Duplicated videos share the same stream_uid — deleting one must not
-  //    destroy the Cloudflare asset still used by the other copy.
   if (video.stream_uid) {
     const { count } = await supabase
       .from('videos')
@@ -104,14 +103,10 @@ export async function DELETE(request, { params }) {
       .eq('stream_uid', video.stream_uid)
 
     if (count === 1) {
-      // This is the sole owner — safe to remove the Cloudflare asset
       await deleteCloudflareVideo(video.stream_uid)
-    } else {
-      console.log(`[Video DELETE] stream_uid ${video.stream_uid} is shared by ${count} videos — skipping Cloudflare delete`)
     }
   }
 
-  // 2. Delete from Supabase (cascades to elements, captions, chapters, etc.)
   const { error } = await supabase.from('videos').delete().eq('id', params.id)
 
   if (error) {

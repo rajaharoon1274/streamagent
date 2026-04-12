@@ -1,42 +1,38 @@
 'use client'
-import { useState }  from 'react'
-import toast         from 'react-hot-toast'
-import { useApp }    from '@/context/AppContext'
+import { useState } from 'react'
+import toast from 'react-hot-toast'
+import { useApp } from '@/context/AppContext'
 
-// ── Branding panel imports ─────────────────────────────────────────────────────
 import PlayButtonPanel from './branding/panels/PlayButtonPanel'
-import ControlsPanel   from './branding/panels/ControlsPanel'
-import ColorsPanel     from './branding/panels/ColorsPanel'
-import ShapePanel      from './branding/panels/ShapePanel'
-import LogoPanel       from './branding/panels/LogoPanel'
+import ControlsPanel from './branding/panels/ControlsPanel'
+import ColorsPanel from './branding/panels/ColorsPanel'
+import ShapePanel from './branding/panels/ShapePanel'
+import LogoPanel from './branding/panels/LogoPanel'
 import ThumbnailPicker from './branding/panels/ThumbnailPicker'
-import BehaviorPanel   from './branding/panels/BehaviorPanel'
-import CaptionsPanel   from './branding/panels/CaptionsPanel'
-import ChaptersPanel   from './branding/panels/ChaptersPanel'
+import BehaviorPanel from './branding/panels/BehaviorPanel'
+import CaptionsPanel from './branding/panels/CaptionsPanel'
+import ChaptersPanel from './branding/panels/ChaptersPanel'
 
-// ── Landing control imports ────────────────────────────────────────────────────
-import AccordionSection    from '@/components/ui/AccordionSection'
-import ContentCTASection   from './landing/controls/ContentCTASection'
+import AccordionSection from '@/components/ui/AccordionSection'
+import ContentCTASection from './landing/controls/ContentCTASection'
 import PageSectionsSection from './landing/controls/PageSectionsSection'
-import ColorsSection       from './landing/controls/ColorsSection'
-import SEOSection          from './landing/controls/SEOSection'
+import ColorsSection from './landing/controls/ColorsSection'
+import SEOSection from './landing/controls/SEOSection'
 
-// ── Branding sub-nav sections ──────────────────────────────────────────────────
 const BRANDING_SECTIONS = [
-  { id: 'play-button', icon: '▶',  label: 'Play Button' },
-  { id: 'controls',    icon: '🎛',  label: 'Controls'   },
-  { id: 'captions',    icon: '💬',  label: 'Captions'   },
-  { id: 'chapters',    icon: '📖',  label: 'Chapters'   },
-  { id: 'behavior',    icon: '⚙',   label: 'Behavior'   },
-  { id: 'colors',      icon: '🎨',  label: 'Colors'     },
-  { id: 'shape',       icon: '⬜',  label: 'Shape'      },
-  { id: 'logo',        icon: '✦',   label: 'Logo'       },
-  { id: 'thumbnail',   icon: '🖼',  label: 'Thumbnail'  },
+  { id: 'play-button', icon: '▶', label: 'Play Button' },
+  { id: 'controls', icon: '🎛', label: 'Controls' },
+  { id: 'captions', icon: '💬', label: 'Captions' },
+  { id: 'chapters', icon: '📖', label: 'Chapters' },
+  { id: 'behavior', icon: '⚙', label: 'Behavior' },
+  { id: 'colors', icon: '🎨', label: 'Colors' },
+  { id: 'shape', icon: '⬜', label: 'Shape' },
+  { id: 'logo', icon: '✦', label: 'Logo' },
+  { id: 'thumbnail', icon: '🖼', label: 'Thumbnail' },
 ]
 
-// ── Branding sidebar content ───────────────────────────────────────────────────
 function BrandingSidebarContent({ video: v, b, onChange, accentColor }) {
-  const [sub,    setSub]    = useState('play-button')
+  const [sub, setSub] = useState('play-button')
   const [saving, setSaving] = useState(false)
 
   const accent = accentColor || '#4F6EF7'
@@ -44,47 +40,51 @@ function BrandingSidebarContent({ video: v, b, onChange, accentColor }) {
   async function saveBranding() {
     setSaving(true)
     try {
+      // Enforce muted when autoplay is on before saving
+      const payload = { ...b }
+      if (payload.autoplay === true) payload.muted = true
+
       const res = await fetch(`/api/videos/${v.id}`, {
-        method:  'PATCH',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ branding: b }),
+        body: JSON.stringify({ branding: payload }),
       })
-      if (!res.ok) throw new Error()
-      toast.success('Branding saved')
-    } catch {
-      toast.error('Failed to save branding')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Save failed')
+      toast.success('Branding saved!')
+    } catch (err) {
+      toast.error(err.message || 'Failed to save branding')
     } finally {
       setSaving(false)
     }
   }
 
+  const panelProps = { b, onChange, videoId: v.id }
+
   const renderPanel = () => {
     const props = { b, onChange, videoId: v.id }
     switch (sub) {
-      case 'play-button': return <PlayButtonPanel  {...props} />
-      case 'controls':    return <ControlsPanel    {...props} />
-      case 'captions':    return <CaptionsPanel />
-      case 'chapters':    return <ChaptersPanel />
-      case 'behavior':    return <BehaviorPanel    {...props} />
-      case 'colors':      return <ColorsPanel      {...props} />
-      case 'shape':       return <ShapePanel       {...props} />
-      case 'logo':        return <LogoPanel        {...props} />
-      case 'thumbnail':   return <ThumbnailPicker  {...props} />
-      default:            return null
+      case 'play-button': return <PlayButtonPanel  {...panelProps} />
+      case 'controls': return <ControlsPanel    {...panelProps} />
+      case 'captions': return <CaptionsPanel    {...panelProps} />
+      case 'chapters': return <ChaptersPanel    {...panelProps} />
+      case 'behavior': return <BehaviorPanel    {...panelProps} />
+      case 'colors': return <ColorsPanel      {...panelProps} />
+      case 'shape': return <ShapePanel       {...panelProps} />
+      case 'logo': return <LogoPanel        {...panelProps} />
+      case 'thumbnail': return <ThumbnailPicker  {...panelProps} />
+      default: return null
     }
   }
 
   return (
     <>
-      {/* Header */}
       <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid var(--b1)', flexShrink: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', marginBottom: 2 }}>Branding</div>
         <div style={{ fontSize: 10, color: 'var(--t3)' }}>Syncs to player &amp; landing page</div>
       </div>
 
-      {/* Sub-nav + panel (scrollable) */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
-        {/* 3-col sub-nav */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 4, marginBottom: 14 }}>
           {BRANDING_SECTIONS.map(s => {
             const act = sub === s.id
@@ -111,44 +111,47 @@ function BrandingSidebarContent({ video: v, b, onChange, accentColor }) {
         {renderPanel()}
       </div>
 
-      {/* Save */}
       <div style={{ padding: '10px 12px', borderTop: '1px solid var(--b1)', flexShrink: 0 }}>
         <button
           onClick={saveBranding}
           disabled={saving}
           style={{
             width: '100%', padding: '8px', borderRadius: 9,
-            background: accent, color: '#fff', fontSize: 12, fontWeight: 700,
-            border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+            background: saving ? 'var(--s3)' : accent,
+            color: saving ? 'var(--t3)' : '#fff',
+            fontSize: 12, fontWeight: 700,
+            border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+            opacity: saving ? 0.7 : 1,
+            transition: 'opacity 0.2s',
           }}
         >
-          {saving ? 'Saving…' : 'Save Branding'}
+          {saving ? 'Saving…' : '💾 Save Branding'}
         </button>
       </div>
     </>
   )
 }
 
-// ── Landing sidebar content ────────────────────────────────────────────────────
 function LandingSidebarContent({ video: v, lp, onChange, accentColor }) {
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  const accent      = accentColor || '#4F6EF7'
+  const accent = accentColor || '#4F6EF7'
   const isPublished = v.privacy === 'published' || v.privacy === 'Published'
 
   async function saveLanding() {
     setSaving(true)
     try {
       const res = await fetch(`/api/videos/${v.id}`, {
-        method:  'PATCH',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ lp }),
+        body: JSON.stringify({ lp }),
       })
-      if (!res.ok) throw new Error()
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Save failed')
       toast.success('Landing page saved!')
-    } catch {
-      toast.error('Failed to save')
+    } catch (err) {
+      toast.error(err.message || 'Failed to save')
     } finally {
       setSaving(false)
     }
@@ -164,7 +167,6 @@ function LandingSidebarContent({ video: v, lp, onChange, accentColor }) {
 
   return (
     <>
-      {/* Header */}
       <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid var(--b1)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)' }}>Landing Page</div>
@@ -179,7 +181,6 @@ function LandingSidebarContent({ video: v, lp, onChange, accentColor }) {
         <div style={{ fontSize: 10, color: 'var(--t3)' }}>Customize content &amp; layout</div>
       </div>
 
-      {/* Accordion controls */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}>
         <AccordionSection title="Content &amp; CTA" defaultOpen>
           <ContentCTASection lp={lp} onChange={onChange} videoId={v.id} />
@@ -195,7 +196,6 @@ function LandingSidebarContent({ video: v, lp, onChange, accentColor }) {
         </AccordionSection>
       </div>
 
-      {/* Footer actions */}
       <div style={{ padding: '10px 12px', borderTop: '1px solid var(--b1)', display: 'flex', flexDirection: 'column', gap: 7, flexShrink: 0 }}>
         <button
           onClick={copyLandingUrl}
@@ -225,29 +225,28 @@ function LandingSidebarContent({ video: v, lp, onChange, accentColor }) {
   )
 }
 
-// ── Main WorkspaceSidebar ──────────────────────────────────────────────────────
 export default function WorkspaceSidebar({
   video: v, tab, accentColor, onBack,
   brandingData, onBrandingChange,
-  landingData,  onLandingChange,
+  landingData, onLandingChange,
 }) {
-  const { state, set } = useApp()
+  const { state } = useApp()
 
-  const vStatus     = v.privacy || v.status || 'draft'
+  const vStatus = v.privacy || v.status || 'draft'
   const isPublished = vStatus === 'published' || vStatus === 'Published'
-  const isPP        = vStatus === 'Password Protected'
+  const isPP = vStatus === 'Password Protected'
   const statusColor = isPublished ? 'var(--grn)' : isPP ? 'var(--amb)' : 'var(--t3)'
   const statusLabel = isPublished ? '● Published' : isPP ? '🔒 Password' : '● Draft'
 
   const fileRows = [
     ['Resolution', v.resolution || '1920 × 1080'],
-    ['File Size',  v.fileSize   || '—'],
-    ['Format',     v.format     || 'MP4 / H.264'],
-    ['Frame Rate', v.fps        || '29.97 fps'],
-    ['Duration',   v.dur        || '—'],
-    ['Audio',      v.audio      || 'AAC Stereo'],
-    ['Uploaded',   v.uploadDate || '—'],
-    ['By',         v.uploadedBy || 'You'],
+    ['File Size', v.fileSize || '—'],
+    ['Format', v.format || 'MP4 / H.264'],
+    ['Frame Rate', v.fps || '29.97 fps'],
+    ['Duration', v.dur || '—'],
+    ['Audio', v.audio || 'AAC Stereo'],
+    ['Uploaded', v.uploadDate || '—'],
+    ['By', v.uploadedBy || 'You'],
   ]
 
   return (
@@ -259,12 +258,12 @@ export default function WorkspaceSidebar({
         height: '100%', overflow: 'hidden',
       }}
     >
-      {/* ── Back button + mini thumbnail (always visible) ── */}
+      {/* Back + mini thumbnail */}
       <div className="vid-ws-sidebar-back-section" style={{ padding: '11px 12px', borderBottom: '1px solid var(--b1)', flexShrink: 0 }}>
         <button
           onClick={onBack}
           onMouseOver={e => e.currentTarget.style.background = 'var(--s3)'}
-          onMouseOut={e  => e.currentTarget.style.background = 'none'}
+          onMouseOut={e => e.currentTarget.style.background = 'none'}
           style={{
             display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none',
             cursor: 'pointer', padding: '6px 8px', borderRadius: 8, width: '100%',
@@ -283,7 +282,6 @@ export default function WorkspaceSidebar({
           <span style={{ fontSize: 12, color: 'var(--t3)', fontWeight: 500 }}>Back to Library</span>
         </button>
 
-        {/* Mini video card */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <div style={{
             width: 48, height: 30, borderRadius: 6, background: accentColor,
@@ -292,11 +290,15 @@ export default function WorkspaceSidebar({
           }}>
             <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.2)' }} />
             <div style={{ position: 'relative' }}>
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="rgba(255,255,255,0.9)"><polygon points="5,3 19,12 5,21" /></svg>
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="rgba(255,255,255,0.9)">
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.title}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {v.title}
+            </div>
             <div style={{ fontSize: 10, color: 'var(--t3)' }}>
               <span style={{ color: statusColor }}>{statusLabel}</span> · {v.dur}
             </div>
@@ -304,9 +306,7 @@ export default function WorkspaceSidebar({
         </div>
       </div>
 
-      {/* ── Tab-specific content ── */}
-
-      {/* OVERVIEW: video file metadata */}
+      {/* Tab-specific content */}
       {tab === 'overview' && (
         <>
           <div style={{ padding: '10px 12px 6px', flexShrink: 0, borderBottom: '1px solid var(--b1)' }}>
@@ -323,7 +323,6 @@ export default function WorkspaceSidebar({
         </>
       )}
 
-      {/* BRANDING: full controls */}
       {tab === 'branding' && (
         <BrandingSidebarContent
           video={v}
@@ -333,7 +332,6 @@ export default function WorkspaceSidebar({
         />
       )}
 
-      {/* LANDING: full controls */}
       {tab === 'landing' && (
         <LandingSidebarContent
           video={v}
@@ -343,7 +341,6 @@ export default function WorkspaceSidebar({
         />
       )}
 
-      {/* SETTINGS: abbreviated info */}
       {tab === 'settings' && (
         <>
           <div style={{ padding: '10px 12px 6px', flexShrink: 0, borderBottom: '1px solid var(--b1)' }}>
@@ -369,7 +366,6 @@ export default function WorkspaceSidebar({
         </>
       )}
 
-      {/* SHARE: brief info */}
       {tab === 'share' && (
         <>
           <div style={{ padding: '10px 12px 6px', flexShrink: 0, borderBottom: '1px solid var(--b1)' }}>
