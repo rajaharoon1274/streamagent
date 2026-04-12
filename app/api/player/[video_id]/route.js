@@ -53,7 +53,18 @@ export async function GET(req, { params }) {
     // ── 2. Fetch workspace bandwidth flag ────────────────────────────────────
     const { data: workspace } = await supabase
         .from('workspaces')
-        .select('bandwidth_gated, bandwidth_degraded, plan_tier')
+        .select(`
+        bandwidth_gated,
+        bandwidth_degraded,
+        plan_tier,
+        meta_pixel_id,
+        tiktok_pixel_id,
+        google_ads_id,
+        linkedin_partner_id,
+        cv_lead,
+        meta_capi_dataset_id,
+        meta_capi_token
+    `)
         .eq('id', video.workspace_id)
         .single()
 
@@ -106,7 +117,7 @@ export async function GET(req, { params }) {
     }))
 
     // ── 5. Strip sensitive data before returning ─────────────────────────────
-    const { password: _pw, workspace_id: _wsId, ...safeVideo } = video
+    const { password: _pw, ...safeVideo } = video
 
     return NextResponse.json(
         {
@@ -120,12 +131,19 @@ export async function GET(req, { params }) {
                 bandwidth_gated: workspace?.bandwidth_gated ?? false,
                 bandwidth_degraded: workspace?.bandwidth_degraded ?? false,
                 plan_tier: workspace?.plan_tier ?? 'core',
+                meta_pixel_id: workspace?.meta_pixel_id ?? null,
+                tiktok_pixel_id: workspace?.tiktok_pixel_id ?? null,
+                google_ads_id: workspace?.google_ads_id ?? null,
+                linkedin_partner_id: workspace?.linkedin_partner_id ?? null,
+                cv_lead: workspace?.cv_lead ?? 20,
+                meta_capi_dataset_id: workspace?.meta_capi_dataset_id ?? null,
+                meta_capi_token: workspace?.meta_capi_token ?? null,
             },
         },
         {
             status: 200,
             headers: {
-                'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=10',
+                'Cache-Control': 'no-store',
                 'Access-Control-Allow-Origin': '*',
             },
         },
